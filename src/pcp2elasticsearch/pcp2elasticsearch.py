@@ -1,6 +1,7 @@
 #!/usr/bin/env pmpython
 #
 # Copyright (C) 2015-2018 Marko Myllynen <myllynen@redhat.com>
+# Copyright (C) 2014-2015,2018 Red Hat.
 #
 # This program is free software; you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by the
@@ -11,15 +12,9 @@
 # WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
 # or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
 # for more details.
-
-# [write_es] Copyright (C) 2014-2015 Red Hat, based on pcp2es by Frank Ch. Eigler
-
-# pylint: disable=superfluous-parens
-# pylint: disable=invalid-name, line-too-long, no-self-use
-# pylint: disable=too-many-boolean-expressions, too-many-statements
-# pylint: disable=too-many-instance-attributes, too-many-locals
-# pylint: disable=too-many-branches, too-many-nested-blocks
-# pylint: disable=broad-except
+#
+# pylint: disable=line-too-long, broad-except, bad-continuation
+#
 
 """ PCP to Elasticsearch Bridge """
 
@@ -30,7 +25,8 @@ import time
 import sys
 
 # Our imports
-from elasticsearch import Elasticsearch, ElasticsearchException
+import json
+import requests
 
 # PCP Python PMAPI
 from pcp import pmapi, pmconfig
@@ -46,6 +42,7 @@ DEFAULT_CONFIG = ["./pcp2elasticsearch.conf", "$HOME/.pcp2elasticsearch.conf", "
 # Defaults
 CONFVER = 1
 ES_INDEX = "pcp"
+ES_SEARCH_TYPE = "pcp-metric"
 ES_SERVER = "http://localhost:9200/"
 
 class pcp2elasticsearch(object):
@@ -60,7 +57,7 @@ class pcp2elasticsearch(object):
         # Configuration directives
         self.keys = ('source', 'output', 'derived', 'header', 'globals',
                      'samples', 'interval', 'type', 'precision', 'daemonize',
-                     'es_server', 'es_index', 'es_hostid',
+                     'es_server', 'es_index', 'es_hostid', 'es_search_type',
                      'count_scale', 'space_scale', 'time_scale', 'version',
                      'count_scale_force', 'space_scale_force', 'time_scale_force',
                      'type_prefer', 'precision_force', 'limit_filter', 'limit_filter_force',
@@ -107,7 +104,9 @@ class pcp2elasticsearch(object):
 
         self.es_server = ES_SERVER
         self.es_index = ES_INDEX
+        self.es_search_type = ES_SEARCH_TYPE
         self.es_hostid = None
+        self.es_failed = False
 
         # Internal
         self.runtime = -1
@@ -179,9 +178,10 @@ class pcp2elasticsearch(object):
         opts.pmSetLongOption("time-scale", 1, "y", "SCALE", "default time unit")
         opts.pmSetLongOption("time-scale-force", 1, "Y", "SCALE", "forced time unit")
 
-        opts.pmSetLongOption("es-host", 1, "g", "SERVER", "elasticsearch server (default: " + ES_SERVER + ")")
-        opts.pmSetLongOption("es-index", 1, "x", "INDEX", "elasticsearch index for metric names (default: " + ES_INDEX + ")")
-        opts.pmSetLongOption("es-hostid", 1, "X", "HOSTID", "elasticsearch host-id for measurements")
+        opts.pmSetLongOption("es-host", 1, "g", "SERVER", "Elasticsearch server (default: " + ES_SERVER + ")")
+        opts.pmSetLongOption("es-index", 1, "x", "INDEX", "Elasticsearch index for metric names (default: " + ES_INDEX + ")")
+        opts.pmSetLongOption("es-hostid", 1, "X", "HOSTID", "Elasticsearch host-id for measurements")
+        opts.pmSetLongOption("es-search-type", 1, "p", "ES_SEARCH_TYPE", "Elasticsearch search type for measurements")
 
         return opts
 
@@ -191,8 +191,8 @@ class pcp2elasticsearch(object):
             return 1
         return 0
 
-    def option(self, opt, optarg, index):
-        """ Perform setup for an individual command line option """
+    def option(self, opt, optarg, _index):
+        """ Perform setup for individual command line option """
         if opt == 'daemonize':
             self.daemonize = 1
         elif opt == 'K':
@@ -257,11 +257,13 @@ class pcp2elasticsearch(object):
             self.es_index = optarg
         elif opt == 'X':
             self.es_hostid = optarg
+        elif opt == 'p':
+            self.es_search_type = optarg
         else:
             raise pmapi.pmUsageErr()
 
     def connect(self):
-        """ Establish a PMAPI context """
+        """ Establish PMAPI context """
         context, self.source = pmapi.pmContext.set_connect_options(self.opts, self.source, self.speclocal)
 
         self.pmfg = pmapi.fetchgroup(context, self.source)
@@ -344,8 +346,8 @@ class pcp2elasticsearch(object):
         self.report(None)
 
     def report(self, tstamp):
-        """ Report the metric values """
-        if tstamp != None:
+        """ Report metric values """
+        if tstamp is not None:
             tstamp = tstamp.strftime(self.timefmt)
 
         self.write_es(tstamp)
@@ -366,7 +368,7 @@ class pcp2elasticsearch(object):
             sys.stdout.write("...\n(Ctrl-C to stop)\n")
 
     def write_es(self, timestamp):
-        """ Write (send) metrics to an Elasticsearch host """
+        """ Write (send) metrics to Elasticsearch host """
         if timestamp is None:
             # Silent goodbye
             return
@@ -374,15 +376,20 @@ class pcp2elasticsearch(object):
         ts = self.context.datetime_to_secs(self.pmfg_ts(), PM_TIME_MSEC)
 
         try:
-            es = Elasticsearch(hosts=[self.es_server])
-            # pylint: disable=unexpected-keyword-arg
-            es.indices.create(index=self.es_index,
-                              ignore=[400],
-                              body={'mappings':{'pcp-metric':
-                                                {'properties':{'@timestamp':{'type':'date'},
-                                                               'host-id':{'type':'string'}}}}})
-        except ElasticsearchException as error:
-            sys.stderr.write("Can't connect to Elasticsearch server %s: %s, continuing.\n" % (self.es_server, str(error)))
+            body = {'ignore': 400,
+                    'mappings': {'pcp-metric':
+                                {'properties':{'@timestamp':{'type':'epoch_milli'},
+                                               '@host-id':{'type':'string'}}}}}
+            headers = {'content-type': 'application/json'} # Do we need this?
+            url = self.es_server+'/'+self.es_index
+            requests.put(url, data=json.dumps(body), headers=headers)
+            if self.es_failed:
+                sys.stderr.write("Reconnected to Elasticsearch server %s.\n" % (self.es_server))
+            self.es_failed = False
+        except Exception as error:
+            if not self.es_failed:
+                sys.stderr.write("Can't connect to Elasticsearch server %s: %s, continuing.\n" % (self.es_server, str(error)))
+            self.es_failed = True
             return
 
         # Assemble all metrics into a single document
@@ -428,13 +435,10 @@ class pcp2elasticsearch(object):
                         insts.append({inst_key: name, last_part: value})
 
         try:
-            # pylint: disable=unexpected-keyword-arg
-            es.index(index=self.es_index,
-                     doc_type='pcp-metric',
-                     timestamp=long(ts),
-                     body=es_doc)
-        except ElasticsearchException as error:
-            sys.stderr.write("Can't send to Elasticsearch server %s: %s, continuing.\n" % (self.es_server, str(error)))
+            url = self.es_server + '/' + self.es_index + '/' + self.es_search_type
+            requests.post(url, data=json.dumps(es_doc), headers=headers)
+        except Exception as error:
+            sys.stderr.write("Cannot send to Elasticsearch server %s: %s, continuing.\n" % (self.es_server, str(error)))
             return
 
     def finalize(self):
@@ -448,9 +452,8 @@ if __name__ == '__main__':
         P.validate_config()
         P.execute()
         P.finalize()
-
     except pmapi.pmErr as error:
-        sys.stderr.write('%s: %s\n' % (error.progname(), error.message()))
+        sys.stderr.write("%s: %s\n" % (error.progname(), error.message()))
         sys.exit(1)
     except pmapi.pmUsageErr as usage:
         usage.message()

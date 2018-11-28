@@ -37,6 +37,7 @@ _pmdabcc_install_filter()
     # and therefore it has no values
     sed \
     -e "s/.*pmdabcc.* Info/Info/g" \
+    -e "s/Tracing PID.*/Tracing PID./g" \
     -e "s/[0-9]\+ warnings, //" \
     -e "s/[0-9]\+ metrics and [0-9]\+ values/X metrics and X values/g" \
     #end
@@ -69,7 +70,7 @@ _pmdabcc_wait_for_metric()
 {
     # Wait for the PMDA to compile the bcc modules and become ready, 30s max
     for i in `seq 1 30`; do grep -q 'Ready to process requests' $PCP_LOG_DIR/pmcd/bcc.log && break; sleep 1; done
-    grep 'Error:' $PCP_LOG_DIR/pmcd/bcc.log
+    sed -n '/Error:/,$p' $PCP_LOG_DIR/pmcd/bcc.log
     if [ $i -ge 30 ]; then
         echo PMDA was not ready in 30 seconds, test failed
         exit
@@ -78,7 +79,10 @@ _pmdabcc_wait_for_metric()
 
 _pmdabcc_wait_for_value()
 {
-    for i in `seq 1 30`; do pminfo -f $1 | grep -q 'inst .* value .*' && break; sleep 1; done
+    value_regex=${2:-'.*'}
+
+    sed -n '/Error:/,$p' $PCP_LOG_DIR/pmcd/bcc.log
+    for i in `seq 1 30`; do pminfo -f $1 | grep -q 'inst .* value '$value_regex && break; sleep 1; done
     if [ $i -ge 30 ]; then
         echo Could not get a single value, test failed
         exit
@@ -97,6 +101,7 @@ _pmdabcc_remove()
 
 _pmdabcc_cleanup()
 {
+    cat $PCP_LOG_DIR/pmcd/bcc.log >> $here/$seq.full
     if [ -f $tmp.backup ]; then
         $sudo cp $tmp.backup $PCP_PMDAS_DIR/bcc/bcc.conf
         $sudo rm $tmp.backup
@@ -145,9 +150,9 @@ _mount_filesystem()
     mountpoint=$tmp.mount.$fs
 
     truncate -s 30M $image
-    mkfs.$fs $image > /dev/null 2>&1
+    echo y | mkfs.$fs $image > /dev/null 2>&1
     mkdir -p $mountpoint
-    $sudo mount $image $mountpoint
+    $sudo mount -t $fs $image $mountpoint
     $sudo chown $(id -u):$(id -g) $mountpoint
 }
 
@@ -172,5 +177,29 @@ _value_filter_nonzero()
 
 _value_filter_exact()
 {
-    grep "$1" > /dev/null && echo OK
+    grep "value $1" > /dev/null && echo OK
+}
+
+# Marko's triage ...
+# openSUSE 15.0 bcc-0.5.0-lp150.9.2 is carrying a patch to backport bcc
+# upstream commit c0ca99a2 but not a subsequent fix made in upstream
+# commit d1a83c1b so bcc on openSUSE 15.0 is broken on this regard.
+#
+_bcc_check_ArgString()
+{
+    if [ -f /etc/os-release ]
+    then
+	if grep 'openSUSE Leap' /etc/os-release >/dev/null
+	then
+	    case "`rpm -q libbcc0`"
+	    in
+		libbcc0-0.5.0-lp150.9.2*)
+		    # BAD
+		    return 1
+	    esac
+	fi
+    fi
+    
+    # OK
+    return 0
 }

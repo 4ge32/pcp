@@ -22,7 +22,7 @@ _usage()
     fi
     echo >&2 "  -h          harvest QA failures"
     echo >&2 "  -i          install built pcp packages"
-    echo >&2 "  -l          harvest daily.log/daily.log.qa after aborted run"
+    echo >&2 "  -l          harvest daily.log/daily.qa.log after aborted run"
     echo >&2 "  -m          build (Makepkgs) for pcp"
     echo >&2 "  -p          git pull for pcp"
     echo >&2 "  -q          run qa"
@@ -63,7 +63,7 @@ End-of-File
     else
 	cat <<End-of-File
 rm -f \$HOME/$1.log
-touch \$HOME/$1.log
+echo "--- starting $1 on \`date\` ---" >\$HOME/$1.log
 End-of-File
     fi
     if [ "$1" = daily ]
@@ -237,8 +237,11 @@ sed -e 's/^/ /' <Logs/pcp \
     -e '/input.* defined but not used/d' \
     -e '/jobserver unavailable: using -j1/d'\
     -e '/^warning: File listed twice: .*python/d' \
+    -e '/Deprecated external dependency generator is used!/d' \
     -e '/^dpkg-shlibdeps: warning: .*\/pmda_pmcd.so contains an unresolvable .* probably a plugin/d' \
     -e '/^configure: WARNING: unrecognized options: --disable-dependency-tracking/d' \
+    -e '/^\/usr\/share\/selinux\/devel\/.* duplicate definition of /d' \
+    -e '/QtCore\/qvector.h:.* memcpy(/d' \
 # end
 if [ -s $tmp.err ]
 then
@@ -475,15 +478,15 @@ rm -f *.out.bad
 qa_restrict="$check_what -x BAD"
 
 echo "Info: QA \$qa_restrict starting"
-./check -l \$qa_restrict >>\$HOME/daily.log.qa 2>&1
+./check -l \$qa_restrict >>\$HOME/daily.qa.log 2>&1
 sts=\$?
-# look for badness in daily.log.qa and report here (so it goes into any
+# look for badness in daily.qa.log and report here (so it goes into any
 # cron-based email)
-awk <\$HOME/daily.log.qa '
+awk <\$HOME/daily.qa.log '
 \$1 == "Aborted!"	{ print }
 \$1 == "Check!"		{ print }'
 # get last block from check.log ... then get the summary on
-# stdout (not needed in the daily.log.qa, already there)
+# stdout (not needed in the daily.qa.log already there)
 sed -e '/^    [0-9 ]*\$/d' <check.log \
 | awk '
 NF == 0	{ txt = ""; next }
@@ -497,22 +500,22 @@ END	{ print txt }' \
 want == 1		{ print }'
 if [ "\$sts" = 0 ]
 then
-    echo "Info: QA \$qa_restrict done" | tee -a \$HOME/daily.log.qa
+    echo "Info: QA \$qa_restrict done" | tee -a \$HOME/daily.qa.log
 else
-    echo "Error: QA \$qa_restrict failed!" | tee -a \$HOME/daily.log.qa
+    echo "Error: QA \$qa_restrict failed!" | tee -a \$HOME/daily.qa.log
 fi
-date >>\$HOME/daily.log.qa
+date >>\$HOME/daily.qa.log
 End-of-File
 }
 
 _script_qa_rerun()
 {
     cat <<End-of-File
-if ./recheck >>\$HOME/daily.log.qa 2>&1
+if ./recheck >>\$HOME/daily.qa.log 2>&1
 then
-    echo "Info: QA recheck" | tee -a \$HOME/daily.log.qa
+    echo "Info: QA recheck" | tee -a \$HOME/daily.qa.log
 else
-    echo "Error: QA recheck failed!" | tee -a \$HOME/daily.log.qa
+    echo "Error: QA recheck failed!" | tee -a \$HOME/daily.qa.log
 fi
 End-of-File
 }
@@ -537,8 +540,8 @@ do
 	nfull=\`expr \$nfull + 1\`
     fi
 done
-[ -s \$HOME/daily.harvest ] && cat \$HOME/daily.harvest >>\$HOME/daily.log.qa
-echo "Info: harvest \$nbad *.bad files, \$nfull *.full files" | tee -a \$HOME/daily.log.qa
+[ -s \$HOME/daily.harvest ] && cat \$HOME/daily.harvest >>\$HOME/daily.qa.log
+echo "Info: harvest \$nbad *.bad files, \$nfull *.full files" | tee -a \$HOME/daily.qa.log
 End-of-File
 }
 
@@ -772,21 +775,37 @@ do
 	    [ X"$what" = Xall ] && check_what='-X 739'
 	    ;;
 
-	vm06|vm10|vm09|vm13|vm33)
-	    # Only -g sanity at this stage for NetBSD or OpenBSD or FreeBSD
-	    # or OpenIndiana
+	vm05)
+	    # Exclude -x valgrind ... does not work on my Gentoo at the
+	    # moment
+	    #
+	    [ X"$what" = Xall ] && check_what='-x valgrind'
+	    ;;
+
+	vm06)
+	    # Only -g sanity at this stage for FreeBSD
 	    #
 	    [ X"$what" = Xall ] && check_what='-g sanity'
 	    ;;
 
-	vm07|vm11)
-	    # Exclude -x valgrind at this stage for Debian stretch
-	    # until
-	    # http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=810295
-	    # is fixed.
-	    # We have a workaround in common.check, so re-enable these
-	    # tests (20 Jul 2016)
+	vm09)
+	    # Only -g sanity at this stage for NetBSD
 	    #
+	    [ X"$what" = Xall ] && check_what='-g sanity'
+	    ;;
+
+	vm10)
+	    # Only selected groups this stage for FreeBSD 10.4
+	    #	sanity trace libpcp
+	    # and some tests are not working yet
+	    #
+	    [ X"$what" = Xall ] && check_what='-g sanity -g trace -g libpcp -g kernel -x valgrind'
+	    ;;
+
+	vm13)
+	    # Only -g sanity at this stage for OpenIndiana
+	    #
+	    [ X"$what" = Xall ] && check_what='-g sanity'
 	    ;;
 
 	vm15)
@@ -802,11 +821,17 @@ do
 	    ;;
 
 	vm32)
-	    # Only selected groups this stage for FreeBSD:
-	    #	sanity trace
+	    # Only selected groups this stage for FreeBSD 11.1
+	    #	sanity trace libpcp
 	    # and some tests are not working yet
 	    #
-	    [ X"$what" = Xall ] && check_what='-g sanity -g trace -X 603'
+	    [ X"$what" = Xall ] && check_what='-g sanity -g trace -g libpcp -x valgrind -X 603'
+	    ;;
+
+	vm33)
+	    # Only -g sanity at this stage for OpenBSD 5.8
+	    #
+	    [ X"$what" = Xall ] && check_what='-g sanity'
 	    ;;
 
 	vm35)
@@ -815,7 +840,7 @@ do
 	    # and no -e processing
 	    [ X"$what" = Xall ] && check_what='-g sanity'
 	    qa_user=pcpqa
-	    qa_dir=/var/lib/pcp/testsuite
+	    qa_dir=/var/lib/pcp/testsuite/qa
 	    if $pflag
 	    then
 		echo "Info: skip -p for vm35"
@@ -837,6 +862,15 @@ do
 		efile=''
 	    fi
 	    ;;
+
+	vm37)
+	    # Only selected groups this stage for OpenBSD 6.4
+	    #	sanity threads
+	    # and some tests are not working yet
+	    #
+	    [ X"$what" = Xall ] && check_what='-g sanity -g threads'
+	    ;;
+
     esac
 
     if which virsh >/dev/null 2>&1
@@ -941,7 +975,7 @@ do
 
 	$iflag && _script_install >>$tmp.script
 
-	_script_header qa >$tmp.script.qa
+	_script_header daily.qa >$tmp.script.qa
 
 	cat >>$tmp.script.qa <<End-of-File
 
@@ -981,25 +1015,26 @@ End-of-File
 	    rm -f $tmp.ok
 	    for i in 1 2 3
 	    do
-		if scp $tmp.script.qa $qa_user@$host:daily.script.qa >$tmp.out 2>&1
+		if scp $tmp.script.qa $qa_user@$host:daily.qa.script >$tmp.out 2>&1
 		then
 		    touch $tmp.ok
 		    break
 		else
 		    cat $tmp.out
-		    echo "Warning: scp for daily.script.qa failed!"
+		    echo "Warning: scp for daily.qa.script failed!"
 		    sleep 2
 		fi
 	    done
 	    if [ ! -f $tmp.ok ]
 	    then
-		echo "Error: cannot copy daily.script.qa to $host ... giving up"
+		echo "Error: cannot copy daily.qa.script to $host ... giving up"
 		continue
 	    fi
 	fi
 
 	# actually do the remote work here
 	#
+	start=`date +%s`
 	ssh -t $build_user@$host sh -c ./daily.script
 	scp -q $build_user@$host:daily.log $tmp.out
 	echo "=== build and install: `date` ===" >>$log
@@ -1008,8 +1043,8 @@ End-of-File
 
 	if $qflag || $rflag || $hflag
 	then
-	    ssh -t $qa_user@$host sh -c ./daily.script.qa
-	    scp -q $qa_user@$host:daily.log.qa $tmp.out
+	    ssh -t $qa_user@$host sh -c ./daily.qa.script
+	    scp -q $qa_user@$host:daily.qa.log $tmp.out
 	    echo "=== qa: `date` ===" >>$log
 	    cat $tmp.out >>$log
 	    echo "=== END ===" >>$log
@@ -1066,7 +1101,16 @@ End-of-File
 		echo "No failures."
 	    fi
 	fi
+	end=`date +%s`
+	echo "$start $end" | awk >>$log '
+    { delta = $2 - $1
+      hr = int(delta/3600)
+      min = int((delta-hr*3600)/60)
+      sec = delta % 60
+      printf "Elapsed time: %d:%02d:%02d (%d secs)\n", hr, min, sec, delta
+    }'
     fi
+    
 
     if $sflag
     then

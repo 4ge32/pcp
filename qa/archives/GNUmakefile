@@ -1,7 +1,7 @@
 #!gmake
 #
 # Copyright (c) 2015 Ken McDonell.  All Rights Reserved.
-# Copyright (c) 2012,2014,2017 Red Hat.
+# Copyright (c) 2012,2014,2017,2018 Red Hat.
 # Copyright (c) 2009 Aconex.  All Rights Reserved.
 # Copyright (c) 1997-2002 Silicon Graphics, Inc.  All Rights Reserved.
 #
@@ -33,31 +33,39 @@ DEFLATE = small.0.xz small.meta small.index \
 	  20130706.0.bz2 20130706.meta 20130706.index \
 	  20180606.0.xz 20180606.meta.xz 20180606.index \
 	  pcp-atop.0.xz pcp-atop.meta pcp-atop.index \
+	  pcp-dstat.0.xz pcp-dstat.meta pcp-dstat.index \
 	  pcp-hotatop.0.xz pcp-hotatop.meta pcp-hotatop.index \
 	  pcp-zeroconf.0.gz pcp-zeroconf.meta pcp-zeroconf.index \
 	  value-test.0.xz value-test.meta value-test.index \
 	  coverage.0.xz coverage.meta coverage.index \
 	  bozo-20170904.0.xz bozo-20170904.meta bozo-20170904.index \
 	  pcp-pidstat-process-states.0.xz pcp-pidstat-process-states.meta \
-	  pcp-pidstat-process-states.index
+	  pcp-pidstat-process-states.index pcp-pidstat-process-args.0.xz \
+	  pcp-pidstat-process-args.index pcp-pidstat-process-args.meta.xz \
+	  pcp-pidstat-timezone.0.xz pcp-pidstat-timezone.meta.xz \
+	  pcp-pidstat-timezone.index zero_disk_activity.index  \
+	  zero_disk_activity.0.xz zero_disk_activity.meta.xz \
+	  20180416.10.00.meta.xz 20180416.10.00.index 20180416.10.00.0.xz \
+	  20180416.10.00.1.xz 20180416.10.00.2.xz 20180416.10.00.3.xz
 
 SCRIPTS = mk.diff mk.gap mk.mysql mk.schizo mk.foo+ \
 	  mk.dynmetric mk.instant mk.dyninsts \
-	  mk.mirage mk.proc \
+	  mk.mirage mk.mirage-3 mk.proc \
 	  mk.numa mk.rewrite mk.eventrec mk.interpmark mk.multihost \
 	  mk.sample_expr mk.tzchange mk.arch-all mk.atop mk.hotatop \
 	  mk.log-derived mk.vmstat mk.rep mk.procsched \
-	  mk.ipcs mk.value-test mk.rank-pred
+	  mk.ipcs mk.value-test mk.rank-pred mk.cputime
 
 CONFIGS = config.verify config.shping YWhcCi.toium.config \
 	  kenj-pc-2.config reduce.config uwrap.config wrap.config \
 	  coverage.config
 
 OTHERS = README ds390-access.gz collectl-qa bigace.pmns \
-	 crontab-sar-report.tar.xz
+	 crontab-sar-report.tar.xz cputime.mpstat cputime.sar
 
 LDIRT = pmlogger.log
 LDIRDIRT = tmp
+MANDIRT =
 
 default default_pcp setup: $(SUBDIRS)
 	$(SUBDIRS_MAKERULE)

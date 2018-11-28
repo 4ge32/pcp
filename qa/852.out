@@ -1629,6 +1629,7 @@ proc.psinfo.pid
     inst [N or "009185 /sbin/getty"] value 9185
     inst [N or "009186 /sbin/getty"] value 9186
     inst [N or "009188 postgres:"] value 9188
+    inst [N or "009268 <exiting>"] value 9268
     inst [N or "009470 /usr/sbin/apache2"] value 9470
     inst [N or "009471 /usr/sbin/apache2"] value 9471
     inst [N or "009472 /usr/sbin/apache2"] value 9472
@@ -1798,6 +1799,7 @@ proc.psinfo.psargs
     inst [N or "009185 /sbin/getty"] value "/sbin/getty 38400 tty5"
     inst [N or "009186 /sbin/getty"] value "/sbin/getty 38400 tty6"
     inst [N or "009188 postgres:"] value "postgres: postgres postgres [local] idle"
+    inst [N or "009268 <exiting>"] value "<exiting>"
     inst [N or "009470 /usr/sbin/apache2"] value "/usr/sbin/apache2 -k start"
     inst [N or "009471 /usr/sbin/apache2"] value "/usr/sbin/apache2 -k start"
     inst [N or "009472 /usr/sbin/apache2"] value "/usr/sbin/apache2 -k start"
@@ -1841,6 +1843,27 @@ proc.psinfo.psargs
     inst [N or "000996 /usr/libexec/docker/docker-containerd-current"] value "/usr/libexec/docker/docker-containerd-current --listen unix:///run/containerd.sock --shim /usr/libexec/docker/docker-containerd-shim-current --start-timeout 2m"
     inst [N or "026287 /usr/libexec/docker/docker-containerd-shim-current"] value "/usr/libexec/docker/docker-containerd-shim-current 0ea0c47ef0e1a90cd10059a0da0abd4da28d3bc35ce15c7beb46da1c7ab02736 /var/run/docker/libcontainerd/0ea0c47ef0e1a90cd10059a0da0abd4da28d3bc35ce15c7beb46da1c7ab02736 /usr/libexec/docker/docker-runc-current"
     inst [N or "026304 /bin/prometheus"] value "/bin/prometheus --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus --web.console.libraries=/usr/share/prometheus/console_libraries --web.console.templates=/usr/share/prometheus/consoles"
+
+== Fetching per-thread proc.psinfo.rss metric - procpid-4.18.13-root-006.tgz
+
+proc.psinfo.rss
+    inst [N or "000001 /usr/lib/systemd/systemd"] value 11292
+    inst [N or "025731 podman"] value 18380
+    inst [N or "025951 /bin/prometheus"] value 27128
+
+== Fetching per-thread proc.psinfo.pid metric - procpid-4.18.13-root-006.tgz
+
+proc.psinfo.pid
+    inst [N or "000001 /usr/lib/systemd/systemd"] value 1
+    inst [N or "025731 podman"] value 25731
+    inst [N or "025951 /bin/prometheus"] value 25951
+
+== Fetching per-thread proc.psinfo.psargs metric - procpid-4.18.13-root-006.tgz
+
+proc.psinfo.psargs
+    inst [N or "000001 /usr/lib/systemd/systemd"] value "/usr/lib/systemd/systemd --switched-root --system --deserialize 32"
+    inst [N or "025731 podman"] value "podman run -p 9091:9090 prom/prometheus"
+    inst [N or "025951 /bin/prometheus"] value "/bin/prometheus --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus --web.console.libraries=/usr/share/prometheus/console_libraries --web.console.templates=/usr/share/prometheus/consoles"
 
 == Fetching per-thread proc.psinfo.rss metric - procpid-4.2.3-root-004.tgz
 

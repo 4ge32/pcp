@@ -414,7 +414,13 @@ do_dialog(char cmd)
 	nchar = add_msg(&p, nchar, "\n\nTerminate this PCP recording session now?");
 
     if (nchar > 0) {
-	char * xconfirm = __pmNativePath(pmGetConfig("PCP_XCONFIRM_PROG"));
+	char *xconfirm = strdup(pmGetConfig("PCP_XCONFIRM_PROG"));
+	if (xconfirm == NULL) {
+	    pmNoMem("do_dialog", strlen(pmGetConfig("PCP_XCONFIRM_PROG"))+1, PM_FATAL_ERR);
+	    /* NOTREACHED */
+	}
+	/* THREADSAFE - no locks acquired in __pmNativePath() */
+	xconfirm = __pmNativePath(xconfirm);
 	int fd = -1;
 
 #if HAVE_MKSTEMP
@@ -432,6 +438,7 @@ do_dialog(char cmd)
 	    fprintf(stderr, "Reason? %s\n", osstrerror());
 	    if (fd != -1)
 		close(fd);
+	    free(xconfirm);
 	    goto failed;
 	}
 	fputs(p, msgf);
@@ -452,11 +459,13 @@ do_dialog(char cmd)
 	    fprintf(stderr, "\nError: __pmProcessUnpickArgs failed for recording session dialog\n");
 	    fprintf(stderr, "Command: \"%s\"\n", lbuf);
 	    fprintf(stderr, "Error: %s\n", pmErrStr(sts));
+	    free(xconfirm);
 	    goto failed;
 	}
 	if ((sts = __pmProcessPipe(&argp, "r", PM_EXEC_TOSS_NONE, &msgf)) < 0) {
 	    fprintf(stderr, "\nError: failed to start command for recording session dialog\n");
 	    fprintf(stderr, "Command: \"%s\"\n", lbuf);
+	    free(xconfirm);
 	    goto failed;
 	}
 
@@ -478,6 +487,7 @@ failed:
 	if (msgf != NULL)
 	    __pmProcessPipeClose(msgf);
 	unlink(msg);
+	free(xconfirm);
     }
     else {
 	fprintf(stderr, "Error: failed to create recording session dialog message!\n");
@@ -820,8 +830,15 @@ main(int argc, char **argv)
 	opts.errors++;
     }
 
-    if (!opts.errors && opts.optind != argc - 1) {
+    if (!opts.errors && ((Cflag == 0 && opts.optind > argc - 1) ||
+			 (Cflag == 1 && opts.optind > argc))) {
 	pmprintf("%s: insufficient arguments\n", pmGetProgname());
+	opts.errors++;
+    }
+
+    if (!opts.errors && ((Cflag == 0 && opts.optind < argc - 1) ||
+			 (Cflag == 1 && opts.optind < argc))) {
+	pmprintf("%s: too many arguments\n", pmGetProgname());
 	opts.errors++;
     }
 
@@ -847,10 +864,14 @@ main(int argc, char **argv)
 	    fprintf(stderr, "%s: Warning: log file (%s) creation failed\n", pmGetProgname(), logfile);
 	    /* continue on ... writing to stderr */
 	}
-    }
 
-    /* base name for archive is here ... */
-    archBase = argv[opts.optind];
+	/* base name for archive is here ... */
+	archBase = strdup(argv[opts.optind]);
+	if (archBase == NULL) {
+	    pmNoMem("main", strlen(argv[opts.optind])+1, PM_FATAL_ERR);
+	    /* NOTREACHED */
+	}
+    }
 
     /* initialise access control */
     if (__pmAccAddOp(PM_OP_LOG_ADV) < 0 ||
@@ -941,6 +962,21 @@ main(int argc, char **argv)
 	    __pmOptFetchDump(stderr, tp->t_fetch);
 	}
     }
+    if (pmDebugOptions.optfetch) {
+	int	j = 0;
+	for (tp = tasklist; tp != NULL; tp = tp->t_next) {
+	    fetchctl_t	*fcp = tp->t_fetch;
+	    int		fg = 0;
+	    fprintf(stderr, "Fetch task[%d] delta: %ld usec numpmid: %d\n",
+		j, (long)(1000000 * tp->t_delta.tv_sec + tp->t_delta.tv_usec),
+		tp->t_numpmid);
+	    while (fcp != NULL) {
+		fprintf(stderr, "  Fetch group[%d][%d] %d metrics\n", j, fg++, fcp->f_numpmid);
+		fcp = fcp->f_next;
+	    }
+	    j++;
+	}
+    }
 
     if (Cflag)
 	exit(0);
@@ -1027,11 +1063,13 @@ main(int argc, char **argv)
 
     fprintf(stderr, "Archive basename: %s\n", archBase);
 
+    if (isdaemon) {
 #ifndef IS_MINGW
-    /* detach yourself from the launching process */
-    if (isdaemon)
+	/* detach yourself from the launching process */
         setpgid(getpid(), 0);
 #endif
+	__pmServerCreatePIDFile(pmGetProgname(), 0);
+    }
 
     /* set up control port */
     init_ports();

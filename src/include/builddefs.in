@@ -174,10 +174,16 @@ ECHO	= @echo@
 LN_S	= @LN_S@
 GREP    = @grep@
 GIT	= @GIT@
+CLINT	= @CPPCHECK@ --std=posix --force --quiet --error-exitcode=1
+PYLINT	= @PYLINT@ --rcfile=$(TOPDIR)/.pylintrc --output-format=colorized
 PYTHON	= @PYTHON@
 PYTHON3	= @PYTHON3@
 DTRACE  = @DTRACE@
+ifeq "$(TARGET_OS)" "freebsd"
+QMAKE	= @qmake@
+else
 QMAKE	= QT_SELECT=@qt_version@ @qmake@
+endif
 
 INSTALL_SH = $(TOPDIR)/install-sh
 INSTALL	= $(INSTALL_SH) -o $(PCP_USER_INSTALL) -g $(PCP_GROUP_INSTALL)
@@ -244,8 +250,10 @@ ENABLE_SHARED = @enable_shared@
 ENABLE_SECURE = @enable_secure@
 ENABLE_PROBES = @enable_probes@
 ENABLE_AVAHI = @enable_avahi@
+ENABLE_DSTAT = @enable_dstat@
 ENABLE_QT = @enable_qt@
 ENABLE_QT3D = @enable_qt3d@
+ENABLE_PERL = @enable_perl@
 ENABLE_PYTHON2 = @enable_python2@
 ENABLE_PYTHON3 = @enable_python3@
 ENABLE_SYSTEMD = @enable_systemd@
@@ -256,6 +264,7 @@ ENABLE_DECOMPRESSION = @enable_decompression@
 ENABLE_LZMA = @enable_lzma@
 
 # selinux configuration bits
+PCP_SELINUX_FILES_LIST_NON_AUTH_DIRS = @pcp_selinux_files_list_non_auth_dirs@
 PCP_SELINUX_CLASS_STATUS = @pcp_selinux_class_status@
 PCP_SELINUX_CAP_USERNS_PTRACE = @pcp_selinux_cap_userns_ptrace@
 PCP_SELINUX_CONTAINER_RUNTIME = @pcp_selinux_container_runtime@
@@ -271,6 +280,8 @@ PCP_SELINUX_HOSTNAME_EXEC_MAP = @pcp_selinux_hostname_exec_map@
 PCP_SELINUX_MOCK = @pcp_selinux_mock@
 PCP_SELINUX_UNCONFINED = @pcp_selinux_unconfined@
 PCP_SELINUX_NUMAD = @pcp_selinux_numad@
+PCP_SELINUX_BPF_STATUS = @pcp_selinux_bpf_status@
+PCP_SELINUX_WAP_PORT = @pcp_selinux_wap_port@
 
 # for code supporting any modern version of perl
 HAVE_PERL = @have_perl@
@@ -284,7 +295,7 @@ HAVE_PYTHON_REQUESTS = @have_python_requests@
 HAVE_PYTHON_SETUPTOOLS = @have_python_setuptools@
 HAVE_PYTHON_JSONPOINTER = @have_python_jsonpointer@
 HAVE_PYTHON_ORDEREDDICT = @have_python_OrderedDict@
-HAVE_PYTHON_ELASTICSEARCH = @have_python_Elasticsearch@
+HAVE_PYTHON_INFLUXDB = @have_python_influxdb@
 HAVE_PYTHON_OPENPYXL = @have_python_openpyxl@
 HAVE_PYTHON_BPF = @have_python_BPF@
 
@@ -313,6 +324,8 @@ LIB_FOR_LZMA = @lib_for_lzma@
 
 HAVE_LIBUV = @HAVE_LIBUV@
 LIB_FOR_LIBUV = @libuv_LIBS@
+HAVE_LIBVARLINK = @HAVE_LIBVARLINK@
+LIB_FOR_LIBVARLINK = @libvarlink_LIBS@
 HAVE_NCURSES = @HAVE_NCURSES@
 LIB_FOR_NCURSES = @ncurses_LIBS@
 HAVE_DEVMAPPER = @HAVE_DEVMAPPER@
@@ -338,6 +351,7 @@ PMDA_BCC = @PMDA_BCC@
 PMDA_RPM = @PMDA_RPM@
 PMDA_JSON = @PMDA_JSON@
 PMDA_PAPI = @PMDA_PAPI@
+PMDA_PODMAN = @PMDA_PODMAN@
 PMDA_LIBVIRT = @PMDA_LIBVIRT@
 PMDA_SYSTEMD = @PMDA_SYSTEMD@
 PMDA_PERFEVENT = @PMDA_PERFEVENT@
@@ -810,21 +824,19 @@ endif	# linux && !gentoo if
 QTFIX = $(AWK) '$$1 == "LIBS" { printf $$1; for (i=2;i<=NF;i++) { if ($$i~/^-L\//) { save=save " " $$i; continue } else if (save!="" && $$i~/^-l/) { printf " %s",save; save="" } printf " %s",$$i } if (save!="") printf " %s",save; print ""; next } { print }'
 
 # Qt magic for build/installs across all the supported platforms
+QTMAKE = $(QMAKE) CONFIG+=$(QT_RELEASE) && $(QTFIX) <Makefile >Makefile.fix && mv Makefile.fix Makefile && $(MAKE) $(MAKEOPTS) -f Makefile
 ifeq ($(PCP_PLATFORM),darwin)
-QTMAKE = $(QMAKE) -spec macx-g++ CONFIG+=$(QT_RELEASE) && $(QTFIX) <Makefile >Makefile.fix && mv Makefile.fix Makefile && make -f Makefile
 MACBUILD = build/$(QT_RELEASE)/$(COMMAND).app/Contents
 BINARY = $(MACBUILD)/MacOS/$(COMMAND)
 LNMAKE = test ! -f $(BINARY) -o -L $(COMMAND) || ( rm -f $(COMMAND) && $(LN_S) $(BINARY) $(COMMAND) )
 WINDOW = mac
 endif
 ifeq ($(PCP_PLATFORM),mingw)
-QTMAKE = $(QMAKE) CONFIG+=$(QT_RELEASE) && $(QTFIX) <Makefile >Makefile.fix && mv Makefile.fix Makefile && $(MAKE) -f Makefile
 BINARY = build/$(QT_RELEASE)/$(COMMAND)$(EXECSUFFIX)
 LNMAKE =
 WINDOW = win
 endif
 ifeq "$(findstring $(PCP_PLATFORM),darwin mingw)" ""
-QTMAKE = $(QMAKE) CONFIG+=$(QT_RELEASE) && $(QTFIX) <Makefile >Makefile.fix && mv Makefile.fix Makefile && $(MAKE) $(MAKEOPTS) -f Makefile
 BINARY = build/$(QT_RELEASE)/$(COMMAND)
 LNMAKE = test ! -f $(BINARY) -o -L $(COMMAND) || ( rm -f $(COMMAND) && $(LN_S) $(BINARY) $(COMMAND) )
 WINDOW = x11

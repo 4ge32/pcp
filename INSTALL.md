@@ -2,7 +2,7 @@
 
 - Packages
   1. Linux Installation (rpm, deb)
-  2. Mac OS X Installation (dmg)
+  2. Mac OS X Installation (brew)
   3. AIX Installation
   4. Solaris Installation
   5. Windows Installation
@@ -52,8 +52,27 @@ root filesystem.
 
 ### 2. Mac OS X Installation
 
-Installing PCP from the DMG file is as simple as clicking on the icon
-in a Finder window, and following the prompts from the installer.
+Installing PCP on MacOSX is done via https://brew.sh/ commands.
+From a Terminal run:
+```
+$ brew install qt
+$ brew link qt --force
+$ brew install pcp
+$ brew link pcp
+$ pcp --version
+```
+
+The ouput for the last command will be something like
+```
+pcp version 4.1.1
+```
+
+Use the version number for creating symlinks (for version 4.1.1)
+```
+$ export version="4.1.1"
+$ sudo ln -s /usr/local/Cellar/pcp/$version/etc/pcp.conf /etc/pcp.conf
+$ sudo ln -s /usr/local/Cellar/pcp/$version/etc/pcp.env /etc/pcp.env
+```
 
 ### 3. AIX Installation
 
@@ -106,10 +125,33 @@ Use 'svcs' command to check the state of the services, e.g.:
 
 ### 5. Windows Installation
 
-Download the native Windows version of PCP from bintray.com/pcp
-which provides a .msi - the system-wide %PATH setting must be
-manually setup to point to the installation location (C:\Glider
-by default).
+There are 3 ways to get PCP working on Windows:
+
+1) Download the native Windows version of PCP from bintray.com/pcp/windows
+
+2) Set up PCP build environment manually. For that you can:
+
+- download Git for Windows SDK (https://github.com/git-for-windows/build-extra/releases)
+- download PCP package from bintray (https://bintray.com/pcp/windows)
+- install PCP package via pacman. (pacman -S mingw-w64-x86_64-pcp-X.Y.Z-any.pkg.tar)
+- set PCP_DIR to C:\git-sdk-64\mingw64
+- add to the system PATH:
+..1. "C:\git-sdk-64\mingw64\bin"
+..2. "C:\git-sdk-64\mingw64\lib"
+..3. "C:\git-sdk-64\mingw64\libexec\pcp\bin"
+- start pmcd
+```
+$PCP_DIR\libexec\pcp\bin\pmcd.exe
+```
+
+3) Same as 2 except building the PCP pacman package from source
+
+- follow https://github.com/git-for-windows/git/wiki/Package-management
+  and get PKGBUILD from https://github.com/Andrii-hotfix/MINGW-packages
+- cd MINGW-packages/mingw-w64-pcp
+- makepkg-mingw -s
+- install pcp package via pacman as above.
+
 
 ## Building from source
 
@@ -224,6 +266,7 @@ You will need to start the PCP Collection Daemon (PMCD), as root:
 
 Linux:
 ```
+# systemctl start pmcd  (or...)
 # service pmcd start  (or...)
 # /etc/init.d/pmcd start  (or...)
 # /etc/rc.d/init.d/pmcd start
@@ -345,7 +388,7 @@ pcp "user" as described in section B.2 above), then
 ```
 $ ./configure --prefix=/some/path
 ```
-This will populate /some/path with a full PCP installation.  To use this 
+This will populate /some/path with a full PCP installation.  To use this
 ensure the following are set in the environment:
 ```
 $ export PCP_DIR=/some/path

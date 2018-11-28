@@ -119,7 +119,6 @@ timevalSleep(PyObject *self, PyObject *args, PyObject *keywords)
     struct timeval ctv;
     long seconds, useconds;
     char *keyword_list[] = {"seconds", "useconds", NULL};
-    extern void __pmtimevalSleep(struct timeval);
 
     if (!PyArg_ParseTupleAndKeywords(args, keywords,
                         "ll:pmtimevalSleep", keyword_list, &seconds, &useconds))
@@ -137,7 +136,6 @@ timevalToReal(PyObject *self, PyObject *args, PyObject *keywords)
     struct timeval ctv;
     long seconds, useconds;
     char *keyword_list[] = {"seconds", "useconds", NULL};
-    extern double pmtimevalToReal(const struct timeval *);
 
     if (!PyArg_ParseTupleAndKeywords(args, keywords,
                         "ll:pmtimevalToReal", keyword_list, &seconds, &useconds))
@@ -152,7 +150,6 @@ setIdentity(PyObject *self, PyObject *args, PyObject *keywords)
 {
     char *name;
     char *keyword_list[] = {"name", NULL};
-    extern int pmSetProcessIdentity(const char *);
 
     if (!PyArg_ParseTupleAndKeywords(args, keywords,
                         "s:pmSetProcessIdentity", keyword_list, &name))
@@ -555,15 +552,13 @@ setOptionArchiveList(PyObject *self, PyObject *args, PyObject *keywords)
 static PyObject *
 setOptionArchive(PyObject *self, PyObject *args, PyObject *keywords)
 {
-    char *archive;
+    char *archive = NULL;
     char *keyword_list[] = {"archive", NULL};
 
     if (!PyArg_ParseTupleAndKeywords(args, keywords,
 			"s:pmSetOptionArchive", keyword_list, &archive))
 	return NULL;
 
-    if ((archive = strdup(archive ? archive : "")) == NULL)
-	return PyErr_NoMemory();
     __pmAddOptArchive(&options, archive);
     Py_INCREF(Py_None);
     return Py_None;
@@ -848,9 +843,9 @@ getOptionsFromList(PyObject *self, PyObject *args, PyObject *keywords)
     for (i = 0; i < argCount; i++) {
 	PyObject *pyarg = PyList_GET_ITEM(pyargv, i);
 #if PY_MAJOR_VERSION >= 3
-	char *string = PyUnicode_AsUTF8(pyarg);
+	char *string = (char *)PyUnicode_AsUTF8(pyarg);
 #else
-	char *string = PyString_AsString(pyarg);
+	char *string = (char *)PyString_AsString(pyarg);
 #endif
 
 	/* All parameters may be referred back to later, e.g. via
@@ -1485,7 +1480,9 @@ MOD_INIT(cpmapi)
     dict_add(dict, "HAVE_BITFIELDS_LTOR", 0);
     dict_add(dict, "HAVE_BITFIELDS_RTOL", 1);
 #endif
+#ifdef PM_SIZEOF_SUSECONDS_T
     dict_add(dict, "PM_SIZEOF_SUSECONDS_T", PM_SIZEOF_SUSECONDS_T);
+#endif
     dict_add(dict, "PM_SIZEOF_TIME_T", PM_SIZEOF_TIME_T);
 
     dict_add(dict, "PM_SPACE_BYTE", PM_SPACE_BYTE);
@@ -1579,6 +1576,8 @@ MOD_INIT(cpmapi)
     dict_add(dict, "PM_MODE_FORW",   PM_MODE_FORW);
     dict_add(dict, "PM_MODE_BACK",   PM_MODE_BACK);
 
+    dict_add(dict, "PM_TEXT_PMID",    PM_TEXT_PMID);
+    dict_add(dict, "PM_TEXT_INDOM",   PM_TEXT_INDOM);
     dict_add(dict, "PM_TEXT_ONELINE", PM_TEXT_ONELINE);
     dict_add(dict, "PM_TEXT_HELP",    PM_TEXT_HELP);
 

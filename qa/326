@@ -33,7 +33,8 @@ _cleanup()
 	    rm -f $tmp.pmcd.conf
 	fi
 	_restore_primary_logger
-	_service pcp restart | _filter_pcp_start
+	_service pcp restart 2>&1 | _filter_pcp_start
+	_restore_auto_restart pmcd
 	_wait_for_pmcd
 	_wait_for_pmlogger
 	rm -f $tmp.*
@@ -67,6 +68,7 @@ _filter_pmval()
 }
 
 trap "_cleanup" 0 1 2 3 15
+_stop_auto_restart pmcd
 
 rm -f $seq.full
 
@@ -87,7 +89,7 @@ End-of-File
 $sudo cp $tmp.tmp $PCP_PMCDCONF_PATH
 
 _writable_primary_logger
-_service pcp restart | _filter_pcp_start
+_service pcp restart 2>&1 | _filter_pcp_start
 _wait_for_pmcd
 if [ -d $PCP_LOG_DIR/pmlogger ]
 then
@@ -108,7 +110,7 @@ sleep 3
 
 echo "=== kill sample PMDA process ==="
 $sudo $signal -a -s TERM pmdasample
-sleep 2 # enough time for pmcd to restart it - once only
+sleep 3 # enough time for pmcd to restart it - once only
 $sudo $signal -a -s TERM pmdasample
 pminfo -v sample >/dev/null 2>&1
 sleep 3

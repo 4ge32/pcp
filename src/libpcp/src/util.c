@@ -268,6 +268,7 @@ logreopen(const char *progname, const char *logname, FILE *oldstream,
 {
     int		oldfd;
     int		dupoldfd;
+    FILE	*outstream = oldstream;
     FILE	*dupoldstream = oldstream;
     char	errmsg[PM_MAXERRMSGLEN];
 
@@ -290,7 +291,7 @@ logreopen(const char *progname, const char *logname, FILE *oldstream,
 	 */
 	unlink(logname);
 
-	oldstream = freopen(logname, "w", oldstream);
+	oldstream = outstream = freopen(logname, "w", oldstream);
 	if (oldstream == NULL) {
 	    int		save_error = oserror();	/* need for error message */
 
@@ -310,6 +311,7 @@ logreopen(const char *progname, const char *logname, FILE *oldstream,
 		else
 		    oldstream = fdopen(fileno(stderr), "w");
 	    }
+	    outstream = oldstream;
 	    if (oldstream != NULL) {
 		/*
 		 * oldstream was NULL, but recovered so now fixup
@@ -325,7 +327,7 @@ logreopen(const char *progname, const char *logname, FILE *oldstream,
 		 */
 		*dupoldstream = *oldstream;	/* struct copy */
 		/* put oldstream back for return value */
-		oldstream = dupoldstream;
+		outstream = dupoldstream;
 	    }
 #ifdef HAVE_STRERROR_R_PTR
 	    {
@@ -357,7 +359,7 @@ logreopen(const char *progname, const char *logname, FILE *oldstream,
 		progname, logname, osstrerror_r(errmsg, sizeof(errmsg)));
 	pmflush();
     }
-    return oldstream;
+    return outstream;
 }
 
 FILE *
@@ -1604,11 +1606,21 @@ pmfstate(int state)
 		if (!xconfirm)
 		    fprintf(stderr, "%s: using stderr - no PCP_XCONFIRM_PROG\n",
 			    pmGetProgname());
-		else if (access(__pmNativePath(xconfirm), X_OK) < 0)
-		    fprintf(stderr, "%s: using stderr - cannot access %s: %s\n",
+		else {
+		    char *path = strdup(xconfirm);
+		    if (path == NULL) {
+			pmNoMem("pmfstate", strlen(xconfirm)+1, PM_FATAL_ERR);
+			/* NOTREACHED */
+		    }
+		    /* THREADSAFE - no locks acquired in __pmNativePath() */
+		    path = __pmNativePath(path);
+		    if (access(path, X_OK) < 0)
+			fprintf(stderr, "%s: using stderr - cannot access %s: %s\n",
 			    pmGetProgname(), xconfirm, osstrerror_r(errmsg, sizeof(errmsg)));
-		else
-		    errtype = PM_USEDIALOG;
+		    else
+			errtype = PM_USEDIALOG;
+		    free(path);
+		}
 	    }
 	    else if (strcmp(filename, "") != 0)
 		errtype = PM_USEFILE;
@@ -1694,6 +1706,7 @@ pmflush(void)
     FILE	*eptr = NULL;
     __pmExecCtl_t	*argp = NULL;
     char	errmsg[PM_MAXERRMSGLEN];
+    char	*path = NULL;
 
     /* see thread-safe notes above */
     if (!xconfirm_init) {
@@ -1721,7 +1734,14 @@ pmflush(void)
 		sts = PM_ERR_GENERIC;
 		break;
 	    }
-	    if ((sts = __pmProcessAddArg(&argp, __pmNativePath(xconfirm))) < 0)
+	    path = strdup(xconfirm);
+	    if (path == NULL) {
+		pmNoMem("pmflush", strlen(xconfirm)+1, PM_FATAL_ERR);
+		/* NOTREACHED */
+	    }
+	    /* THREADSAFE - no locks acquired in __pmNativePath() */
+	    path = __pmNativePath(path);
+	    if ((sts = __pmProcessAddArg(&argp, path)) < 0)
 		break;
 	    if ((sts = __pmProcessAddArg(&argp, "-t")) < 0)
 		break;
@@ -1748,7 +1768,7 @@ pmflush(void)
 	    /* no thread-safe issue here ... we're executing xconfirm */
 	    if ((sts = __pmProcessExec(&argp, PM_EXEC_TOSS_ALL, PM_EXEC_WAIT)) < 0) {
 		fprintf(stderr, "%s: __pmProcessExec(%s, ...) failed: %s\n",
-		    pmGetProgname(), __pmNativePath(xconfirm),
+		    pmGetProgname(), path,
 		    pmErrStr_r(sts, errmsg, sizeof(errmsg)));
 	    }
 	    /*
@@ -1767,6 +1787,10 @@ pmflush(void)
     }
 
     PM_UNLOCK(util_lock);
+
+    if (path != NULL)
+	free(path);
+
     return sts;
 }
 
@@ -2271,7 +2295,7 @@ pow(double x, double y)
 	double y1,t1,t2,r,s,t,u,v,w;
 	int i,j,k,yisint,n;
 	int hx,hy,ix,iy;
-	unsigned lx,ly;
+	unsigned lx,ly,hshift;
 
 	hx = __HI(x); lx = __LO(x);
 	hy = __HI(y); ly = __LO(y);
@@ -2341,7 +2365,8 @@ pow(double x, double y)
 	    }
 	}
 
-	n = (hx>>31)+1;
+	hshift = (unsigned)hx;
+	n = (hshift>>31)+1;
 
     /* (x<0)**(non-int) is NaN */
 	if((n|yisint)==0) return (x-x)/(x-x);
@@ -2490,16 +2515,18 @@ __pmProcessExists(pid_t pid)
     return (len > 0);
 }
 #elif defined(IS_FREEBSD) || defined(IS_OPENBSD)
+#include <errno.h>
 int
 __pmProcessExists(pid_t pid)
 {
     /*
-     * kill(.., 0) returns -1 if the process exists.
+     * kill(.., 0) -1 and errno == ESRCH if the process does not exist
      */
-    if (kill(pid, 0) == -1)
-	return 1;
-    else
+    errno = 0;
+    if (kill(pid, 0) == -1 && errno == ESRCH)
 	return 0;
+    else
+	return 1;
 }
 #elif !defined(IS_MINGW)
 #define PROCFS			"/proc"
@@ -2561,8 +2588,16 @@ __pmProcessRunTimes(double *usr, double *sys)
 #endif
 
 #if !defined(IS_MINGW)
+/*
+ * fromChild - pipe used for reading from the caller, connected to the
+ * standard output of the created process
+ * toChild - pipe used for writing from the caller, connected to the
+ * std input of the created process
+ * If either is NULL, no pipe is created and created process inherits
+ * stdio streams from the parent.
+ */
 pid_t
-__pmProcessCreate(char **argv, int *infd, int *outfd)
+__pmProcessCreate(char **argv, int *fromChild, int *toChild)
 {
     int		in[2];
     int		out[2];
@@ -2581,8 +2616,8 @@ __pmProcessCreate(char **argv, int *infd, int *outfd)
 	/* parent */
 	close(in[0]);
 	close(out[1]);
-	*infd = out[0];
-	*outfd = in[1];
+	*fromChild = out[0];
+	*toChild = in[1];
     }
     else {
 	/* child */
@@ -2617,6 +2652,8 @@ void
 pmSetProgname(const char *program)
 {
     char	*p;
+
+    __pmInitLocks();	/* not used here, just get in early */
 
     if (program == NULL) {
 	/* Restore the default application name */

@@ -19,10 +19,7 @@ include $(TOPDIR)/src/include/builddefs
 
 INCLUDE_SUBDIR = include
 PMNS_SUBDIR = pmns
-LIBPCP_SUBDIR = libpcp
-ifeq "$(TARGET_OS)" "mingw"
-LIBPCP_SUBDIR += libpcp_static
-endif
+LIBPCP_SUBDIR = libpcp libpcp_static
 LIBS_SUBDIRS = \
 	libpcp_pmda \
 	libpcp_trace \
@@ -49,6 +46,7 @@ OTHER_SUBDIRS = \
 	pcp2graphite \
 	pcp2influxdb \
 	pcp2json \
+	pcp2spark \
 	pcp2xlsx \
 	pcp2xml \
 	pcp2zabbix \
@@ -139,11 +137,6 @@ default_pcp : $(SUBDIRS)
 install :: default_pcp install_pcp
 
 install_pcp : $(SUBDIRS)
-	$(SUBDIRS_MAKERULE)
-
-check :: check_pcp
- 
-check_pcp : pcp python
 	$(SUBDIRS_MAKERULE)
 
 $(LIBPCP_SUBDIR): $(INCLUDE_SUBDIR)

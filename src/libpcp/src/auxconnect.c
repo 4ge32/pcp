@@ -294,13 +294,14 @@ __pmSockAddr *
 __pmStringToSockAddr(const char *cp)
 {
     __pmSockAddr *addr = __pmSockAddrAlloc();
+
     if (addr) {
-        if (cp == NULL || strcmp(cp, "INADDR_ANY") == 0) {
+	if (cp == NULL || strcmp(cp, "INADDR_ANY") == 0) {
 	    addr->sockaddr.inet.sin_addr.s_addr = INADDR_ANY;
 	    /* Set the address family to 0, meaning "not set". */
 	    addr->sockaddr.raw.sa_family = 0;
 	}
-        else if (strcmp(cp, "INADDR_LOOPBACK") == 0) {
+	else if (strcmp(cp, "INADDR_LOOPBACK") == 0) {
 	    addr->sockaddr.inet.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 	    /* Set the address family to 0, meaning "not set". */
 	    addr->sockaddr.raw.sa_family = 0;
@@ -352,10 +353,10 @@ __pmStringToSockAddr(const char *cp)
 	    }
 	    else {
 		addr->sockaddr.raw.sa_family = AF_INET;
-	        sts = inet_pton(AF_INET, cp, &addr->sockaddr.inet.sin_addr);
+		sts = inet_pton(AF_INET, cp, &addr->sockaddr.inet.sin_addr);
 	    }
 	    if (sts <= 0) {
-	        __pmSockAddrFree(addr);
+		__pmSockAddrFree(addr);
 		addr = NULL;
 	    }
 	}
@@ -897,7 +898,7 @@ __pmAuxConnectPMCDPort(const char *hostname, int pmcd_port)
     __pmHostEnt		*servInfo;
     int			fd;
     int			sts;
-    int			fdFlags[FD_SETSIZE];
+    int			fdFlags[PM_FDSET_SIZE];
     __pmFdSet		allFds;
     __pmFdSet		readyFds;
     int			maxFd;
@@ -909,11 +910,11 @@ __pmAuxConnectPMCDPort(const char *hostname, int pmcd_port)
 
     if ((servInfo = __pmGetAddrInfo(hostname)) == NULL) {
 	if (pmDebugOptions.context) {
-	    const char	*errmsg;
 	    PM_LOCK(__pmLock_extcall);
-	    errmsg = hoststrerror();		/* THREADSAFE */
-	    fprintf(stderr, "%s:__pmAuxConnectPMCDPort(%s, %d) : hosterror=%d, ``%s''\n",
-		    __FILE__, hostname, pmcd_port, hosterror(), errmsg);
+	    fprintf(stderr, "%s:__pmAuxConnectPMCDPort(%s, %d) : "
+			    "hosterror=%d, ``%s''\n",
+		    __FILE__, hostname, pmcd_port, hosterror(),
+		    hoststrerror());		/* THREADSAFE */
 	    PM_UNLOCK(__pmLock_extcall);
 	}
 	return -EHOSTUNREACH;
@@ -934,7 +935,7 @@ __pmAuxConnectPMCDPort(const char *hostname, int pmcd_port)
     for (myAddr = __pmHostEntGetSockAddr(servInfo, &enumIx);
 	 myAddr != NULL;
 	 myAddr = __pmHostEntGetSockAddr(servInfo, &enumIx)) {
-#if !defined(IS_SOLARIS)
+#if !defined(IS_SOLARIS) && !defined(IS_MINGW)
 	const __pmAddrInfo	*ai;
 	/*
 	 * We should be ignoring any entry without SOCK_STREAM (= 1),
@@ -943,6 +944,12 @@ __pmAuxConnectPMCDPort(const char *hostname, int pmcd_port)
 	 */
 	ai = __pmHostEntGetAddrInfo(servInfo, enumIx);
 	if (ai->ai_socktype != SOCK_STREAM) {
+	    if (pmDebugOptions.context && pmDebugOptions.desperate) {
+		char *sockname = __pmSockAddrToString(myAddr);
+		fprintf(stderr, "__pmAuxConnectPMCDPort(%s, %d): skip socket %s because type=%d not %d\n",
+			  hostname, pmcd_port, sockname, ai->ai_socktype, SOCK_STREAM);
+		free(sockname);
+	    }
 	    __pmSockAddrFree(myAddr);
 	    continue;
 	}
@@ -958,10 +965,10 @@ __pmAuxConnectPMCDPort(const char *hostname, int pmcd_port)
 			  __FILE__, hostname, pmcd_port, __pmSockAddrGetFamily(myAddr));
 	    fd = -EINVAL;
 	}
-	if (fd < 0) {
+	if (fd < 0 || fd >= PM_FDSET_SIZE) {
 	    if (pmDebugOptions.context && pmDebugOptions.desperate) {
 		char *sockname = __pmSockAddrToString(myAddr);
-		fprintf(stderr, "__pmAuxConnectPMCDPortfd: %s filed to create socket, errno=%d\n", sockname, errno);
+		fprintf(stderr, "__pmAuxConnectPMCDPort: failed to create socket %s, errno=%d\n", sockname, errno);
 		free(sockname);
 	    }
 	    __pmSockAddrFree(myAddr);
@@ -1505,7 +1512,8 @@ __pmSecureClientHandshake(int fd, int flags, const char *hostname, __pmHashCtl *
 int
 __pmSocketClosed(void)
 {
-    switch (oserror()) {
+    int		sts;
+    switch ((sts = oserror())) {
 	/*
 	 * Treat this like end of file on input.
 	 *
@@ -1533,8 +1541,19 @@ __pmSocketClosed(void)
 	case EHOSTDOWN:
 	case EHOSTUNREACH:
 	case ECONNREFUSED:
+#ifdef IS_MINGW
+	case WSAECONNRESET:
+	case WSAETIMEDOUT:
+	case WSAENETDOWN:
+	case WSAENETUNREACH:
+	/* case WSAEHOSTDOWN: same as EHOSTDOWN above */
+	case WSAEHOSTUNREACH:
+	case WSAECONNREFUSED:
+#endif
 	    return 1;
     }
+    if (pmDebugOptions.pdu && pmDebugOptions.desperate)
+	fprintf(stderr, "__pmSocketClosed: unmatched error=%d\n", sts);
     return 0;
 }
 

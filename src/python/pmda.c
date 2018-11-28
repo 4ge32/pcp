@@ -45,6 +45,7 @@
 static pmdaInterface dispatch;
 static pmdaNameSpace *pmns;
 static int need_refresh;
+static char *helptext_file;
 static PyObject *indom_list;	  	/* indom list */
 static PyObject *metric_list;	  	/* metric list */
 static PyObject *pmns_dict;		/* metric pmid:names dictionary */
@@ -62,6 +63,8 @@ static PyObject *fetch_cb_func;
 static PyObject *label_cb_func;
 static PyObject *refresh_all_func;
 static PyObject *refresh_metrics_func;
+
+static PyThreadState *thread_state;
 
 static Py_ssize_t nindoms;
 static pmdaIndom *indom_buffer;
@@ -796,9 +799,9 @@ text(int ident, int type, char **buffer, pmdaExt *pmda)
     if (value == NULL)
 	return PM_ERR_TEXT;
 #if PY_MAJOR_VERSION >= 3
-    *buffer = PyUnicode_AsUTF8(value);
+    *buffer = (char *)PyUnicode_AsUTF8(value);
 #else
-    *buffer = PyString_AsString(value);
+    *buffer = (char *)PyString_AsString(value);
 #endif
     /* "value" is a borrowed reference, do not decrement */
     return 0;
@@ -854,7 +857,9 @@ init_dispatch(PyObject *self, PyObject *args, PyObject *keywords)
 	pmdaDaemon(&dispatch, PMDA_INTERFACE_7, name, domain, logfile, NULL);
 	dispatch.version.four.text = text;
     } else {
-	p = strdup(help);
+	if (helptext_file)
+	    free(helptext_file);
+	helptext_file = p = strdup(help);	/* permanent reference */
 	pmdaDaemon(&dispatch, PMDA_INTERFACE_7, name, domain, logfile, p);
     }
     dispatch.version.seven.fetch = fetch;
@@ -1081,6 +1086,30 @@ pmda_refresh_metrics(void)
     }
 }
 
+/*
+ * Acquire the global interpreter lock before calling Python callbacks
+ */
+static int
+check_callback(void)
+{
+    if (thread_state) {
+	PyEval_RestoreThread(thread_state);
+	thread_state = NULL;
+    }
+    return 1;
+}
+
+/*
+ * Release the global interpreter lock after calling Python callbacks
+ * This ensures that Python threads can execute while the PMDA is waiting
+ * for new PDUs
+ */
+static void
+done_callback(void)
+{
+    thread_state = PyEval_SaveThread();
+}
+
 static PyObject *
 pmda_dispatch(PyObject *self, PyObject *args, PyObject *keywords)
 {
@@ -1145,7 +1174,17 @@ pmda_dispatch(PyObject *self, PyObject *args, PyObject *keywords)
 
 	if (pmDebugOptions.libpmda)
 	    fprintf(stderr, "pmda_dispatch entering PDU loop\n");
-	pmdaMain(&dispatch);
+
+        dispatch.version.any.ext->e_checkCallBack = check_callback;
+        dispatch.version.any.ext->e_doneCallBack = done_callback;
+
+        /*
+         * done_callback() releases the GIL
+         * it will be reacquired in check_callback() once a PDU arrives
+         */
+        done_callback();
+        pmdaMain(&dispatch);
+	check_callback(); /* reacquire GIL for graceful exit */
     }
     Py_INCREF(Py_None);
     return Py_None;
@@ -1195,6 +1234,21 @@ pmda_pmid(PyObject *self, PyObject *args, PyObject *keywords)
 }
 
 static PyObject *
+pmid_build(PyObject *self, PyObject *args, PyObject *keywords)
+{
+    int result;
+    int domain, cluster, item;
+    char *keyword_list[] = {"domain", "cluster", "item", NULL};
+
+    if (!PyArg_ParseTupleAndKeywords(args, keywords,
+			"iii:pmid_build", keyword_list,
+			&domain, &cluster, &item))
+	return NULL;
+    result = pmID_build(domain, cluster, item);
+    return Py_BuildValue("i", result);
+}
+
+static PyObject *
 pmda_indom(PyObject *self, PyObject *args, PyObject *keywords)
 {
     int result;
@@ -1205,6 +1259,21 @@ pmda_indom(PyObject *self, PyObject *args, PyObject *keywords)
 			"i:pmda_indom", keyword_list, &serial))
 	return NULL;
     result = pmInDom_build(dispatch.domain, serial);
+    return Py_BuildValue("i", result);
+}
+
+static PyObject *
+indom_build(PyObject *self, PyObject *args, PyObject *keywords)
+{
+    int result;
+    int domain, serial;
+    char *keyword_list[] = {"domain", "serial", NULL};
+
+    if (!PyArg_ParseTupleAndKeywords(args, keywords,
+			"ii:indom_build", keyword_list,
+			&domain, &serial))
+	return NULL;
+    result = pmInDom_build(domain, serial);
     return Py_BuildValue("i", result);
 }
 
@@ -1353,7 +1422,11 @@ set_refresh_metrics(PyObject *self, PyObject *args)
 static PyMethodDef methods[] = {
     { .ml_name = "pmda_pmid", .ml_meth = (PyCFunction)pmda_pmid,
 	.ml_flags = METH_VARARGS|METH_KEYWORDS },
+    { .ml_name = "pmid_build", .ml_meth = (PyCFunction)pmid_build,
+	.ml_flags = METH_VARARGS|METH_KEYWORDS },
     { .ml_name = "pmda_indom", .ml_meth = (PyCFunction)pmda_indom,
+	.ml_flags = METH_VARARGS|METH_KEYWORDS },
+    { .ml_name = "indom_build", .ml_meth = (PyCFunction)indom_build,
 	.ml_flags = METH_VARARGS|METH_KEYWORDS },
     { .ml_name = "pmda_units", .ml_meth = (PyCFunction)pmda_units,
 	.ml_flags = METH_VARARGS|METH_KEYWORDS },

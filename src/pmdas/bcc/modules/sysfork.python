@@ -41,8 +41,8 @@ units_count = pmUnits(0, 0, 1, 0, 0, PM_COUNT_ONE)
 # PCP BCC Module
 #
 class PCPBCCModule(PCPBCCBase):
-    """ PCP BCC biotop module """
-    def __init__(self, config, log, err):
+    """ PCP BCC sysfork module """
+    def __init__(self, config, log, err, _):
         """ Constructor """
         PCPBCCBase.__init__(self, MODULE, config, log, err)
 

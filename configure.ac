@@ -23,57 +23,49 @@ AC_PREREQ([2.63])dnl
 dnl Irix build issue ... use the tools from the local filesystems
 unset ROOT TOOLROOT
 
-AC_ARG_WITH(
-    [64bit],
+AC_ARG_WITH([64bit],
     [AS_HELP_STRING([--with-64bit],
 		    [turn on 64 bit compilation mode (default is platform dependent)])],
     [use_64bit=$withval; PACKAGE_CONFIGURE="$PACKAGE_CONFIGURE --with-64bit=$withval"])
 
-AC_ARG_WITH(
-    [optimization],
+AC_ARG_WITH([optimization],
     [AS_HELP_STRING([--with-optimization],
 		    [enable optimization for C/C++ code (default is yes)])],
     [use_optimization=$withval; PACKAGE_CONFIGURE="$PACKAGE_CONFIGURE --with-optimization=$withval"],
     [use_optimizaton=yes])
 
-AC_ARG_WITH(
-    [threads],
+AC_ARG_WITH([threads],
     [AC_HELP_STRING([--with-threads],
 		    [enable support for multiple threads (default is on)])],
     [do_threads=$withval; PACKAGE_CONFIGURE="$PACKAGE_CONFIGURE --with-threads=$withval"],
     [do_threads=check])
 
-AC_ARG_WITH(
-    [secure-sockets],
+AC_ARG_WITH([secure-sockets],
     [AC_HELP_STRING([--with-secure-sockets],
 		    [enable support for secure sockets (default is on)])],
     [do_secure=$withval; PACKAGE_CONFIGURE="$PACKAGE_CONFIGURE --with-secure-sockets=$withval"],
     [do_secure=check])
 
-AC_ARG_WITH(
-    [static-probes],
+AC_ARG_WITH([static-probes],
     [AC_HELP_STRING([--with-static-probes],
 		    [enable support for static probes (default is on)])],
     [do_probes=$withval; PACKAGE_CONFIGURE="$PACKAGE_CONFIGURE --with-static-probes=$withval"],
     [do_probes=check])
 
-AC_ARG_WITH(
-    [infiniband],
+AC_ARG_WITH([infiniband],
     [AC_HELP_STRING([--with-infiniband],
 		    [enable support for Infiniband metrics (default is on)])],
     [do_infiniband=$withval; PACKAGE_CONFIGURE="$PACKAGE_CONFIGURE --with-infiniband=$withval"],
     [do_infiniband=check])
 
-AC_ARG_WITH(
-    [user],
+AC_ARG_WITH([user],
     [AS_HELP_STRING([--with-user],
 		    [user account under which daemons run (default is pcp)])],
     [pcp_user=$withval; PACKAGE_CONFIGURE="$PACKAGE_CONFIGURE --with-user-account=$withval"],
     [pcp_user=pcp])
 AC_SUBST(pcp_user)
 
-AC_ARG_WITH(
-    [group],
+AC_ARG_WITH([group],
     [AS_HELP_STRING([--with-group],
 		    [user group under which daemons run (default is pcp)])],
     [pcp_group=$withval; PACKAGE_CONFIGURE="$PACKAGE_CONFIGURE --with-group-account=$withval"],
@@ -104,6 +96,12 @@ AC_ARG_WITH([qt3d],
     [do_qt3d=$withval; PACKAGE_CONFIGURE="$PACKAGE_CONFIGURE --with-qt3d=$withval"],
     [do_qt3d=check])
 
+AC_ARG_WITH([perl],
+    [AC_HELP_STRING([--with-perl],
+                    [enable support for tools requiring Perl (default is on)])],
+    [do_perl=$withval; PACKAGE_CONFIGURE="$PACKAGE_CONFIGURE --with-perl=$withval"],
+    [do_perl=check])
+
 AC_ARG_WITH([python],
     [AC_HELP_STRING([--with-python],
                     [enable support for tools requiring Python (default is on)])],
@@ -115,6 +113,12 @@ AC_ARG_WITH([python3],
                     [enable support for tools requiring Python3 (default is on)])],
     [do_python3=$withval; PACKAGE_CONFIGURE="$PACKAGE_CONFIGURE --with-python3=$withval"],
     [do_python3=check])
+
+AC_ARG_WITH([dstat-symlink],
+    [AC_HELP_STRING([--with-dstat-symlink],
+		    [enable support for /usr/bin/dstat symlink (default is on)])],
+    [do_dstat_symlink=$withval; PACKAGE_CONFIGURE="$PACKAGE_CONFIGURE --with-dstat-symlink=$withval"],
+    [do_dstat_symlink=check])
 
 AC_ARG_WITH([books],
     [AC_HELP_STRING([--with-books],
@@ -141,6 +145,12 @@ AC_ARG_WITH([perfevent],
 		   [enable perfevent pmda (default is on)])],
     [do_perfevent=$withval; PACKAGE_CONFIGURE="$PACKAGE_CONFIGURE --with-perfevent=$withval"],
     [do_perfevent=check])
+
+AC_ARG_WITH([pmdapodman],
+    [AC_HELP_STRING([--with-pmdapodman],
+		   [enable podman pmda (default is on)])],
+    [do_pmdapodman=$withval; PACKAGE_CONFIGURE="$PACKAGE_CONFIGURE --with-pmdapodman=$withval"],
+    [do_pmdapodman=check])
 
 AC_ARG_WITH([pmdabcc],
     [AC_HELP_STRING([--with-pmdabcc],
@@ -374,7 +384,7 @@ fi
 
 dnl check if user wants their own C compiler
 cflags_abi=
-AC_PROG_CC(suncc egcc gcc cc)
+AC_PROG_CC(suncc egcc gcc cc clang)
 if test $target_os = solaris
 then
     AC_PATH_PROG(CCPATH,$CC,$CC)
@@ -489,7 +499,7 @@ AS_IF([test "x$cc_is_gcc" = xyes -a "$enable_visibility" != no],[
 ])
 AC_SUBST(INVISIBILITY)
 
-AC_PROG_CXX(eg++ g++ c++)
+AC_PROG_CXX(eg++ g++ c++ clang++)
 cxx=$CXX
 AC_SUBST(cxx)
 AC_MSG_CHECKING([for working C++ compiler])
@@ -616,7 +626,7 @@ then
     AC_MSG_RESULT([ -n])
   fi
 else
-  echo_n= echo_c='\c'
+  echo_n= echo_c='\\c'
   AC_MSG_RESULT([backslash-c])
 fi
 AC_SUBST(echo_n)
@@ -774,12 +784,18 @@ AC_OUTPUT(src/include/pcp/platform_defs.h src/include/pcp/platformsz.h)
 AC_CHECK_PROGS(GIT, git)
 AC_SUBST(GIT)
 
+AC_CHECK_PROGS(CPPCHECK, cppcheck, /bin/true)
+AC_SUBST(CPPCHECK)
+
+AC_CHECK_PROGS(PYLINT, pylint, /bin/true)
+AC_SUBST(PYLINT)
+
 dnl check if python available for the build and runtime
-AC_CHECK_PROGS(PYTHON, python, python2.7)
+AC_CHECK_PROGS(PYTHON, [python python2.7])
 AC_SUBST(PYTHON)
 
 dnl check if python3 available for the build and runtime
-AC_CHECK_PROGS(PYTHON3, python3, python3.4)
+AC_CHECK_PROGS(PYTHON3, [python3 python3.7 python3.6 python3.4])
 AC_SUBST(PYTHON3)
 
 dnl check if python tools/packages wanted (need python >= 2.6)
@@ -803,9 +819,8 @@ AS_IF([test "x$do_python" != "xno"], [
 		enable_python2=false
 	    else
 		AC_CHECK_HEADERS([python${PY_MAJOR}.${PY_MINOR}/Python.h], [], [
-		    echo WARNING: Python version $PY_MAJOR.$PY_MINOR header file missing.
-		    echo Cannot proceed with the Python $PY_MAJOR installation found.
-		    enable_python2=false
+		    echo WARNING: Python version $PY_MAJOR.$PY_MINOR header file may be missing.
+		    echo Proceeding with the Python $PY_MAJOR installation found, regardless.
 		])
 	    fi
 	fi
@@ -839,9 +854,8 @@ AS_IF([test "x$do_python3" != "xno"], [
 		enable_python3=false
 	    else
 		AC_CHECK_HEADERS([python${PY_MAJOR}.${PY_MINOR}m/Python.h], [], [
-		    echo WARNING: Python version $PY_MAJOR.$PY_MINOR header file missing.
-		    echo Cannot proceed with the Python $PY_MAJOR installation found.
-		    enable_python3=false
+		    echo WARNING: Python version $PY_MAJOR.$PY_MINOR header file may be missing.
+		    echo Proceeding with the Python $PY_MAJOR installation found, regardless.
 		])
 	    fi
 	fi
@@ -880,6 +894,20 @@ else
 fi
 AC_SUBST(pcp_python_prog)
 
+dnl Enable for support for the /usr/bin/dstat compatibility symlink
+AC_MSG_CHECKING(for dstat symlink)
+enable_dstat=false
+if test "$do_dstat_symlink" = "check" -o "$do_dstat_symlink" = "yes"
+then
+    enable_dstat=true
+    if test "$have_python" = "false"
+    then
+	AC_MSG_ERROR([cannot enable dstat symlink - no python found])
+    fi
+fi
+AC_SUBST(enable_dstat)
+if $enable_dstat; then AC_MSG_RESULT(yes); else AC_MSG_RESULT(no); fi
+
 dnl check availability of some Python modules
 dnl usage PCP_CHECK_PYTHON_MODULE(module_name) or
 dnl PCP_CHECK_PYTHON_MODULE(module_name, <import string>)
@@ -910,8 +938,6 @@ PCP_CHECK_PYTHON_MODULE(BPF, [from bcc import BPF])
 AC_SUBST(have_python_BPF)
 PCP_CHECK_PYTHON_MODULE(OrderedDict, [from collections import OrderedDict])
 AC_SUBST(have_python_OrderedDict)
-PCP_CHECK_PYTHON_MODULE(Elasticsearch, [from elasticsearch import Elasticsearch])
-AC_SUBST(have_python_Elasticsearch)
 PCP_CHECK_PYTHON_MODULE(jsonpointer)
 AC_SUBST(have_python_jsonpointer)
 PCP_CHECK_PYTHON_MODULE(openpyxl)
@@ -924,6 +950,15 @@ PCP_CHECK_PYTHON_MODULE(libvirt)
 AC_SUBST(have_python_libvirt)
 PCP_CHECK_PYTHON_MODULE(six)
 AC_SUBST(have_python_six)
+
+AC_MSG_CHECKING([if the python InfluxDB support should be included])
+have_python_influxdb=false
+if test "$have_python" = true
+then
+    $have_python_requests && $have_python_OrderedDict && have_python_influxdb=true
+fi
+AC_SUBST(have_python_influxdb)
+if $have_python_influxdb; then AC_MSG_RESULT(yes); else AC_MSG_RESULT(no); fi
 
 AC_MSG_CHECKING([if the json PMDA should be included])
 pmda_json=false
@@ -951,21 +986,26 @@ dnl check if perl available for the build and runtime
 AC_CHECK_PROGS(PERL, perl)
 AC_SUBST(PERL)
 
-AC_MSG_CHECKING([for any perl version])
-if test "$cross_compiling" = "yes"; then
-    ans=$have_perl
-    echo "cross-compile -> \"$ans\"" >&5
-elif test -n "$PERL"
-then
-    pcp_perl_prog=$PERL
-    have_perl=true
-else
-    pcp_perl_prog=""
-    have_perl=false
-fi
+enable_perl=false
+AS_IF([test "x$do_perl" != "xno"], [
+    enable_perl=true
+    AC_MSG_CHECKING([for any perl version])
+    if test "$cross_compiling" = "yes"; then
+        ans=$have_perl
+        echo "cross-compile -> \"$ans\"" >&5
+    elif test -n "$PERL"
+    then
+        pcp_perl_prog=$PERL
+        have_perl=true
+    else
+        pcp_perl_prog=""
+        have_perl=false
+    fi
+    AC_MSG_RESULT($pcp_perl_prog)
+], [have_perl=false])
 AC_SUBST(pcp_perl_prog)
+AC_SUBST(enable_perl)
 AC_SUBST(have_perl)
-AC_MSG_RESULT($pcp_perl_prog)
 
 AC_MSG_CHECKING([if the SNMP PMDA should be included])
 pmda_snmp=false
@@ -1001,15 +1041,12 @@ if $pmda_mysql; then AC_MSG_RESULT(yes); else AC_MSG_RESULT(no); fi
 
 AC_MSG_CHECKING([if the postgresql PMDA should be included])
 pmda_postgresql=false
-if test "$have_perl" = true
+if test "$have_python" = true
 then
-    dnl rpm build for postgresql PMDA needs Perl DBI and DBD::Pg
-    if $pcp_perl_prog -e "use DBI" >/dev/null 2>&1
+    dnl rpm build for postgresql PMDA needs python psycopg2 module
+    if $pcp_python_prog -c "import psycopg2" >/dev/null 2>&1
     then
-	if $pcp_perl_prog -e "use DBD::Pg" >/dev/null 2>&1
-	then
-	    pmda_postgresql=true
-	fi
+	pmda_postgresql=true
     fi
 fi
 AC_SUBST(PMDA_POSTGRESQL, $pmda_postgresql)
@@ -1030,13 +1067,18 @@ if $pmda_oracle; then AC_MSG_RESULT(yes); else AC_MSG_RESULT(no); fi
 
 AC_MSG_CHECKING([if the elasticsearch PMDA should be included])
 pmda_elasticsearch=false
-if test "$have_perl" = true
+if test "$have_python" = true
 then
-    dnl rpm build for elasticsearch PMDA needs Perl LWP::UserAgent
-    if $pcp_perl_prog -e "use LWP::UserAgent" >/dev/null 2>&1
+    dnl rpm build for elasticsearch PMDA needs Python urllib module
+    if $pcp_python_prog -c "import urllib" >/dev/null 2>&1
     then
 	pmda_elasticsearch=true
     fi
+    if $pcp_python_prog -c "import urllib2" >/dev/null 2>&1
+    then
+	pmda_elasticsearch=true
+    fi
+
 fi
 AC_SUBST(PMDA_ELASTICSEARCH, $pmda_elasticsearch)
 if $pmda_elasticsearch; then AC_MSG_RESULT(yes); else AC_MSG_RESULT(no); fi
@@ -1599,6 +1641,7 @@ AC_CHECK_HEADERS(netioapi.h, [], [], [#include <winsock2.h>])
 AC_CHECK_HEADERS(fts.h libzfs.h)
 AC_CHECK_HEADERS(sys/statvfs.h sys/statfs.h sys/mount.h)
 AC_CHECK_HEADERS(ncurses/curses.h)
+AC_CHECK_HEADERS(linux/perf_event.h)
 
 dnl Check if we have <sys/endian.h> ... standard way
 AC_MSG_CHECKING([for sys/endian.h ])
@@ -1646,8 +1689,11 @@ then
 fi
 AC_SUBST(lib_for_regex)
 
-PKG_CHECK_MODULES([libuv], [libuv], [have_libuv=true], [have_libuv=false])
+PKG_CHECK_MODULES([libuv], [libuv >= 1.0], [have_libuv=true], [have_libuv=false])
 AC_SUBST(HAVE_LIBUV, [$have_libuv])
+
+PKG_CHECK_MODULES([libvarlink], [libvarlink], [have_libvarlink=true], [have_libvarlink=false])
+AC_SUBST(HAVE_LIBVARLINK, [$have_libvarlink])
 
 PKG_CHECK_MODULES([ncurses], [ncurses], [have_ncurses=true], [have_ncurses=false])
 AC_SUBST(HAVE_NCURSES, [$have_ncurses])
@@ -1667,8 +1713,7 @@ then
 fi
 AC_SUBST(HAVE_DEVMAPPER, [$have_devmapper])
 
-PKG_CHECK_MODULES([SYSTEMD], [libsystemd],
-                  [pmda_systemd=true], [pmda_systemd=false])
+PKG_CHECK_MODULES([SYSTEMD], [libsystemd], [pmda_systemd=true], [pmda_systemd=false])
 if $pmda_systemd
 then
     :
@@ -1752,7 +1797,7 @@ AS_IF([test "x$do_papi" != "xno"], [
 	    ;;
     esac
 
-    # $papi_LIBS may include -lpapi harmlessly redudantly with AC_CHECK_LIB
+    # $papi_LIBS may include -lpapi harmlessly redundantly with AC_CHECK_LIB
     AC_CHECK_LIB([papi], [PAPI_library_init],
 		 [papi_libs="$LDFLAGS -lpapi"],
 		 [enable_papi=false])
@@ -1818,6 +1863,14 @@ AS_IF([test "x$do_perfevent" = "xyes"], [
 AC_MSG_CHECKING([if the perfevent PMDA should be included])
 AC_SUBST(PMDA_PERFEVENT, $pmda_perfevent)
 if $pmda_perfevent; then AC_MSG_RESULT(yes); else AC_MSG_RESULT(no); fi
+
+dnl Do you have varlink libraries for pmdapodman?
+AC_MSG_CHECKING([if the podman PMDA should be included])
+pmda_podman=false
+AS_IF([test "x$do_pmdapodman" = "xyes"], [pmda_podman=true])
+AS_IF([test "x$do_pmdapodman" = "xcheck"], [$have_libvarlink && pmda_podman=true])
+AC_SUBST(PMDA_PODMAN, $pmda_podman)
+if $pmda_podman; then AC_MSG_RESULT(yes); else AC_MSG_RESULT(no); fi
 
 dnl Do you have RPM Package Manager libraries for pmdarpm?
 pmda_rpm=false
@@ -1942,6 +1995,7 @@ test "$enable_selinux" = "false" && AC_MSG_RESULT(no)
 AC_SUBST(enable_selinux)
 AC_SUBST(pcp_selinux_dir)
 
+
 pcp_selinux_class_status=false
 pcp_selinux_cap_userns_ptrace=false
 pcp_selinux_container_runtime=false
@@ -1957,13 +2011,23 @@ pcp_selinux_hostname_exec_map=false
 pcp_selinux_mock=false
 pcp_selinux_unconfined=false
 pcp_selinux_numad=false
+pcp_selinux_bpf_class=false
+pcp_selinux_wap_port=false
+pcp_selinux_files_list_non_auth_dirs=false
 
 AS_IF([test "x$enable_selinux" != "xfalse"], [
 for policy_file in /etc/selinux/targeted/policy/policy.*
 do
+    seinfo --common >/dev/null 2>&1
+    if test $? -eq 0
+    then
+        seinfo_common_flag="--common"
+    else
+        seinfo_common_flag="--class"
+    fi
     if test -f "$policy_file"
     then
-        class_status=`eval seinfo -x --class=system -- $policy_file | grep status | awk '{ print $1 }'`
+        class_status=`eval seinfo -x --class=system $seinfo_common_flag  -- $policy_file | grep status | awk '{ print $1 }'`
     	if test "x$class_status" != "x"
 	then
 	    pcp_selinux_class_status=true
@@ -1998,7 +2062,7 @@ do
 	then
 	    pcp_selinux_systemd_exec=true
 	fi
-	cap_userns_ptrace=`eval seinfo -x --class=cap_userns -- $policy_file 2>&1 | grep sys_ptrace | awk '{ print $1 }'`
+	cap_userns_ptrace=`eval seinfo -x --class=cap_userns $seinfo_common_flag -- $policy_file 2>&1 | grep sys_ptrace | awk '{ print $1 }'`
     	if test "x$cap_userns_ptrace" != "x"
 	then
 	    pcp_selinux_cap_userns_ptrace=true
@@ -2013,12 +2077,12 @@ do
 	then
 	    pcp_selinux_tracefs=true
 	fi
-	sock_file_getattr=`eval seinfo -x --class=sock_file -- $policy_file | grep getattr | awk '{ print $1 }'`
+	sock_file_getattr=`eval seinfo -x --class=sock_file $seinfo_common_flag -- $policy_file | grep getattr | awk '{ print $1 }'`
 	if test "x$sock_file_getattr" != "x"
 	then
 	    pcp_selinux_sock_file_getattr=true
 	fi
-	hostname_exec_map_a=`eval seinfo -x --class=file -- $policy_file | grep map | awk '{ print $1 }'`
+	hostname_exec_map_a=`eval seinfo -x --class=file $seinfo_common_flag -- $policy_file | grep map | awk '{ print $1 }'`
 	hostname_exec_map_b=`eval seinfo -x --common file -- $policy_file 2>/dev/null | grep map | awk '{ print $1 }'`
 	if test "x$hostname_exec_map_a" != "x" -o "x$hostname_exec_map_b" != "x"
 	then
@@ -2039,6 +2103,21 @@ do
        then
            pcp_selinux_numad=true
        fi
+       bpf_class=`eval seinfo -x --class=bpf -- $policy_file 2>/dev/null | grep bpf | awk '{ print $1 }'`
+       if test "x$bpf_class" != "x"
+       then
+	    pcp_selinux_bpf_status=true
+       fi
+       wap_port=`eval seinfo -t -- $policy_file | grep wap_wsp_port_t | awk '{ print $1 }'`
+       if test "x$wap_port" != "x"
+       then
+            pcp_selinux_wap_port=true
+       fi
+       auth_file_type=`eval seinfo -a -- $policy_file | grep non_auth_file_type | awk '{ print $1 }'`
+       if test "x$auth_file_type" != "x"
+       then
+           pcp_selinux_files_list_non_auth_dirs=true
+       fi
     fi
 done
 ])
@@ -2057,6 +2136,9 @@ AC_SUBST(pcp_selinux_hostname_exec_map)
 AC_SUBST(pcp_selinux_mock)
 AC_SUBST(pcp_selinux_unconfined)
 AC_SUBST(pcp_selinux_numad)
+AC_SUBST(pcp_selinux_bpf_status)
+AC_SUBST(pcp_selinux_wap_port)
+AC_SUBST(pcp_selinux_files_list_non_auth_dirs)
 
 dnl Checks for library functions.
 AC_TYPE_SIGNAL
@@ -2456,13 +2538,13 @@ int main()
     printf("lld\n");
 #endif
 #else
-/* on NetBSD, for example, there is no __WORDSIZE */
-    if (sizeof(int) == 8)
-	printf("d\n");
+/* on NetBSD and OpenBSD, for example, there is no __WORDSIZE */
+    if (sizeof(long long) == 8)
+	printf("lld\n");
     else if (sizeof(long) == 8)
 	printf("ld\n");
-    else if (sizeof(long long) == 8)
-	printf("lld\n");
+    else if (sizeof(int) == 8)
+	printf("d\n");
     else {
 	printf("no clue what printf format to use for __int64_t\n");
 	return(1);
@@ -2475,6 +2557,9 @@ End-of-File
 	if test -x ./conftest
 	then
 	    ans=`./conftest`
+	    if test $target_os = mingw -a "$ans" = "lld"; then
+		ans='I64d'
+	    fi
 	    echo "./conftest -> \"$ans\"" >&5
 	fi
     fi
@@ -2654,7 +2739,9 @@ End-of-File
     rm -rf conftest conftest.*
 fi
 AC_MSG_RESULT($ans)
-AC_DEFINE_UNQUOTED(PM_SIZEOF_SUSECONDS_T, $ans, [sizeof suseconds_t])
+if test -n "$ans"; then
+    AC_DEFINE_UNQUOTED(PM_SIZEOF_SUSECONDS_T, $ans, [sizeof suseconds_t])
+fi
 
 AC_MSG_CHECKING([sizeof time_t])
 if test "$cross_compiling" = "yes"; then
@@ -2672,7 +2759,9 @@ End-of-File
     rm -rf conftest conftest.*
 fi
 AC_MSG_RESULT($ans)
-AC_DEFINE_UNQUOTED(PM_SIZEOF_TIME_T, $ans, [sizeof time_t])
+if test -n "$ans"; then
+    AC_DEFINE_UNQUOTED(PM_SIZEOF_TIME_T, $ans, [sizeof time_t])
+fi
 
 dnl check sizeof long
 AC_MSG_CHECKING([sizeof long])
@@ -3271,8 +3360,8 @@ AC_SUBST(pcp_sysconfig_dir)
 
 dnl logs
 AC_ARG_WITH(logdir,[AC_HELP_STRING([--with-logdir],[log directory [LOCALSTATEDIR/log/pcp]])],
-                   [pcp_log_dir=$withval],
-                   [pcp_log_dir=$localstatedir/log/pcp])
+                  [pcp_log_dir=$withval],
+                  [pcp_log_dir=$localstatedir/log/pcp])
 pcp_log_dir=`eval echo $pcp_log_dir`
 pcp_log_dir=`eval echo $pcp_log_dir`
 AC_SUBST(pcp_log_dir)
@@ -3281,8 +3370,13 @@ pcp_sa_dir=$pcp_log_dir/sa
 AC_SUBST(pcp_sa_dir)
 
 AC_ARG_WITH(rundir,[AC_HELP_STRING([--with-rundir],[run directory [LOCALSTATEDIR/run/pcp]])],
-                   [pcp_run_dir=$withval],
-                   [pcp_run_dir=$localstatedir/run/pcp])
+                  [pcp_run_dir=$withval], [
+if test -d /run
+then
+    pcp_run_dir="/run/pcp"
+else
+    pcp_run_dir="$localstatedir/run/pcp"
+fi])
 pcp_run_dir=`eval echo $pcp_run_dir`
 pcp_run_dir=`eval echo $pcp_run_dir`
 AC_SUBST(pcp_run_dir)

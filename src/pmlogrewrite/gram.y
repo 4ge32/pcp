@@ -42,6 +42,14 @@ static char		*one_name;
 static textspec_t	*current_textspec;
 static int		do_walk_text;
 
+static int		current_label_id;
+static char *		current_label_name;
+static char *		current_label_value;
+static int		current_label_instance;
+static char *		current_label_instance_name;
+static labelspec_t	*current_labelspec;
+static int		do_walk_label;
+
 indomspec_t *
 walk_indom(int mode)
 {
@@ -200,6 +208,619 @@ walk_text(int mode, int flag, char *which, int dupok)
     return tp;
 }
 
+labelspec_t *
+walk_label(int mode, int flag, char *which, int dupok)
+{
+    static labelspec_t	*lp;
+
+    if (do_walk_label > 1) {
+	if (mode == W_START)
+	    lp = label_root;
+	else
+	    lp = lp->l_next;
+
+	/* Only consider the active specs. */
+	while (lp != NULL && (lp->flags & LABEL_ACTIVE) == 0)
+	    lp = lp->l_next;
+    }
+    else {
+	if (mode == W_START) {
+	    lp = current_labelspec;
+	    if (lp)
+		assert ((lp->flags & LABEL_ACTIVE));
+	}
+	else
+	    lp = NULL;
+    }
+
+    if (lp != NULL) {
+	lp->flags &= ~LABEL_ACTIVE;
+	
+	if (!dupok && (lp->flags & flag)) {
+	    if ((lp->old_type & PM_LABEL_CONTEXT)) {
+		pmsprintf(mess, sizeof(mess), "Duplicate %s clause for context label",
+			  which);
+	    }
+	    else if ((lp->old_type & PM_LABEL_DOMAIN)) {
+		pmsprintf(mess, sizeof(mess), "Duplicate %s clause for label for domain %d",
+			  which, pmID_domain(lp->old_id));
+	    }
+	    else if ((lp->old_type & PM_LABEL_CLUSTER)) {
+		pmsprintf(mess, sizeof(mess), "Duplicate %s clause for label for cluster %d.%d",
+			  which, pmID_domain(lp->old_id), pmID_cluster(lp->old_id));
+	    }
+	    else if ((lp->old_type & PM_LABEL_ITEM)) {
+		pmsprintf(mess, sizeof(mess), "Duplicate %s clause for label for metric %s",
+			  which, pmIDStr(lp->old_id));
+	    }
+	    else if ((lp->old_type & PM_LABEL_INDOM)) {
+		pmsprintf(mess, sizeof(mess), "Duplicate %s clause for label for indom %s",
+			  which, pmInDomStr(lp->old_id));
+	    }
+	    else if ((lp->old_type & PM_LABEL_INSTANCES)) {
+		pmsprintf(mess, sizeof(mess), "Duplicate %s clause for label for the instances of indom %s",
+			  which, pmInDomStr(lp->old_id));
+	    }
+	    yyerror(mess);
+	}
+	if (flag != LABEL_DELETE) {
+	    if (lp->flags & LABEL_DELETE) {
+		if ((lp->old_type & PM_LABEL_CONTEXT)) {
+		    pmsprintf(mess, sizeof(mess), "Conflicting %s clause for deleted context label",
+			      which);
+		}
+		else if ((lp->old_type & PM_LABEL_DOMAIN)) {
+		    pmsprintf(mess, sizeof(mess), "Conflicting %s clause for deleted label for domain %d",
+			      which, pmID_domain(lp->old_id));
+		}
+		else if ((lp->old_type & PM_LABEL_CLUSTER)) {
+		    pmsprintf(mess, sizeof(mess), "Conflicting %s clause for deleted label for cluster %d.%d",
+			      which, pmID_domain(lp->old_id), pmID_cluster(lp->old_id));
+		}
+		else if ((lp->old_type & PM_LABEL_ITEM)) {
+		    pmsprintf(mess, sizeof(mess), "Conflicting %s clause for deleted label for metric %s",
+			      which, pmIDStr(lp->old_id));
+		}
+		else if ((lp->old_type & PM_LABEL_INDOM)) {
+		    pmsprintf(mess, sizeof(mess), "Conflicting %s clause for deleted label for indom %s",
+			      which, pmInDomStr(lp->old_id));
+		}
+		else if ((lp->old_type & PM_LABEL_INSTANCES)) {
+		    pmsprintf(mess, sizeof(mess), "Conflicting %s clause for deleted label for the instances of indom %s",
+			      which, pmInDomStr(lp->old_id));
+		}
+		yyerror(mess);
+	    }
+	}
+	else {
+	    if (lp->flags & (~LABEL_DELETE)) {
+		if ((lp->old_type & PM_LABEL_CONTEXT)) {
+		    pmsprintf(mess, sizeof(mess), "Conflicting delete and other clauses for context label");
+		}
+		else if ((lp->old_type & PM_LABEL_DOMAIN)) {
+		    pmsprintf(mess, sizeof(mess), "Conflicting delete and other clauses for label for domain %d",
+			      pmID_domain(lp->old_id));
+		}
+		else if ((lp->old_type & PM_LABEL_CLUSTER)) {
+		    pmsprintf(mess, sizeof(mess), "Conflicting delete and other clauses for label for cluster %d.%d",
+			      pmID_domain(lp->old_id), pmID_cluster(lp->old_id));
+		}
+		else if ((lp->old_type & PM_LABEL_ITEM)) {
+		    pmsprintf(mess, sizeof(mess), "Conflicting delete and other clauses for label for metric %s",
+			      pmIDStr(lp->old_id));
+		}
+		else if ((lp->old_type & PM_LABEL_INDOM)) {
+		    pmsprintf(mess, sizeof(mess), "Conflicting delete and other clauses for label for indom %s",
+			      pmInDomStr(lp->old_id));
+		}
+		else if ((lp->old_type & PM_LABEL_INSTANCES)) {
+		    pmsprintf(mess, sizeof(mess), "Conflicting delete and other clauses for label for the instances of indom %s",
+			      pmInDomStr(lp->old_id));
+		}
+		yyerror(mess);
+	    }
+	}
+    }
+
+    return lp;
+}
+
+void
+deactivate_labels(void)
+{
+    labelspec_t	*lp;
+    for (lp = walk_label(W_START, LABEL_ACTIVE, "active", 0); lp != NULL; lp = walk_label(W_NEXT, 0, "", 0)) {
+	lp->flags &= ~LABEL_ACTIVE;
+    }
+}
+
+void
+new_context_label()
+{
+    labelspec_t	*lp;
+    int		sts;
+    char	buf[PM_MAXLABELJSONLEN];
+
+    /*
+     * Ignore the other change specs which were identified and
+     * add the new label to the generic context label change spec.
+     * Search for an existing one first.
+     */
+    deactivate_labels();
+    for (lp = label_root; lp != NULL; lp = lp->l_next) {
+	if (lp->old_type == PM_LABEL_CONTEXT) {
+	    assert (lp->old_id == PM_ID_NULL);
+	    if (lp->old_label == NULL)
+		break;
+	}
+    }
+
+    /* Create one if none exists. */
+    if (lp == NULL)
+	lp = create_label(PM_LABEL_CONTEXT, PM_ID_NULL, 0, NULL, NULL);
+
+    /* Add the new label to the label change spec. */
+    pmsprintf(buf, sizeof(buf), "{%s:%s}",
+	      current_label_name, current_label_value);
+    if ((sts = __pmAddLabels(&lp->new_labels, buf, PM_LABEL_CONTEXT)) < 0) {
+	pmsprintf(mess, sizeof(mess),
+		  "Unable to add new context label %s: %s",
+		  buf, pmErrStr(sts));
+	yyerror(mess);
+    }
+    lp->new_labels->inst = 0;
+    lp->flags |= LABEL_NEW;
+}
+
+void
+new_domain_label(int domain)
+{
+    labelspec_t		*lp;
+    int			sts;
+    int			found = 0;
+    __pmContext		*ctxp;
+    __pmHashCtl		*hcp;
+    __pmHashNode	*node;
+    char		buf[PM_MAXLABELJSONLEN];
+
+    /*
+     * Ignore the change specs which were previously identified and instead
+     * search the metadata for metrics in the given domain.
+     * Create or re-use the change record for each one found. 
+     */
+    deactivate_labels();
+
+    ctxp = __pmHandleToPtr(pmWhichContext());
+    assert(ctxp != NULL);
+    /*
+     * Note: This application is single threaded, and once we have ctxp
+     *	     the associated __pmContext will not move and will only be
+     *	     accessed or modified synchronously either here or in libpcp.
+     *	     We unlock the context so that it can be locked as required
+     *	     within libpcp.
+     */
+    PM_UNLOCK(ctxp->c_lock);
+
+    /* Prepare the JSON for the new label. */
+    pmsprintf(buf, sizeof(buf), "{%s:%s}",
+	      current_label_name, current_label_value);
+
+    hcp = &ctxp->c_archctl->ac_log->l_hashpmid;
+    for (node = __pmHashWalk(hcp, PM_HASH_WALK_START);
+	 node != NULL;
+	 node = __pmHashWalk(hcp, PM_HASH_WALK_NEXT)) {
+	if (pmID_domain(node->key) != domain)
+	    continue;
+
+	/*
+	 * A metric in this domain exists.
+	 * Add the new label to the generic label change spec for this
+	 * domain. Search for an existing one first.
+	 */
+	found = 1;
+	for (lp = label_root; lp != NULL; lp = lp->l_next) {
+	    if (lp->old_type != PM_LABEL_DOMAIN)
+		continue;
+	    if (lp->old_id != domain)
+		continue;
+	    if (lp->old_label == NULL)
+		break;
+	}
+
+	/* Create one if none exists. */
+	if (lp == NULL)
+	    lp = create_label(PM_LABEL_DOMAIN, domain, 0, NULL, NULL);
+
+	/* Add the new label to the label change spec. */
+	if ((sts = __pmAddLabels(&lp->new_labels, buf, PM_LABEL_DOMAIN)) < 0) {
+	    pmsprintf(mess, sizeof(mess),
+		      "Unable to add new domain label %s: %s",
+		      buf, pmErrStr(sts));
+	    yyerror(mess);
+	}
+	lp->new_labels->inst = 0;
+	lp->flags |= LABEL_NEW;
+
+	/* We only need to find one metric in the specified domain. */
+	break;
+    }
+
+    /* Did we find any clusters matching the spec? */
+    if (! found) {
+	pmsprintf(mess, sizeof(mess),
+		  "No matching domain for new label %s", buf);
+	yywarn(mess);
+    }
+}
+
+void
+new_cluster_label(int cluster)
+{
+    labelspec_t		*lp;
+    int			sts;
+    int			found = 0;
+    __pmContext		*ctxp;
+    __pmHashCtl		*hcp;
+    __pmHashNode	*node;
+    char		buf[PM_MAXLABELJSONLEN] = "";
+
+    /*
+     * Ignore the change specs which were previously identified and instead
+     * search the metadata for metrics in the given domain.
+     * Create or re-use the change record for each one found. 
+     */
+    deactivate_labels();
+
+    ctxp = __pmHandleToPtr(pmWhichContext());
+    assert(ctxp != NULL);
+    /*
+     * Note: This application is single threaded, and once we have ctxp
+     *	     the associated __pmContext will not move and will only be
+     *	     accessed or modified synchronously either here or in libpcp.
+     *	     We unlock the context so that it can be locked as required
+     *	     within libpcp.
+     */
+    PM_UNLOCK(ctxp->c_lock);
+
+    /* Prepare the JSON for the new label. */
+    pmsprintf(buf, sizeof(buf), "{%s:%s}",
+	      current_label_name, current_label_value);
+
+    hcp = &ctxp->c_archctl->ac_log->l_hashpmid;
+    for (node = __pmHashWalk(hcp, PM_HASH_WALK_START);
+	 node != NULL;
+	 node = __pmHashWalk(hcp, PM_HASH_WALK_NEXT)) {
+	if (pmID_domain(node->key) != pmID_domain(cluster))
+	    continue;
+	if (! current_star_metric && 
+	    pmID_cluster(node->key) != pmID_cluster(cluster))
+	    continue;
+
+	/*
+	 * A metric in this cluster exists.
+	 * Add the new label to the generic label change spec for the
+	 * identified cluster. Search for an existing one first.
+	 */
+	found = 1;
+	for (lp = label_root; lp != NULL; lp = lp->l_next) {
+	    if (lp->old_type != PM_LABEL_CLUSTER)
+		continue;
+	    if (pmID_domain(lp->old_id) != pmID_domain((pmID)(node->key)))
+		continue;
+	    if (pmID_cluster(lp->old_id) != pmID_cluster((pmID)(node->key)))
+		continue;
+	    if (lp->old_label == NULL)
+		break;
+	}
+
+	if (lp == NULL) {
+	    pmID current_cluster =
+		pmID_build(pmID_domain(node->key), pmID_cluster(node->key), 0);
+	    lp = create_label(PM_LABEL_CLUSTER, current_cluster, 0, NULL, NULL);
+	}
+
+	/* Add the new label to the label change spec. */
+	if ((sts = __pmAddLabels(&lp->new_labels, buf, PM_LABEL_CLUSTER)) < 0) {
+	    pmsprintf(mess, sizeof(mess),
+		      "Unable to add new cluster label %s: %s",
+		      buf, pmErrStr(sts));
+	    yyerror(mess);
+	}
+	lp->new_labels->inst = 0;
+	lp->flags |= LABEL_NEW;
+
+	/* Do we need to look for more clusters? */
+	if (! current_star_metric)
+	    break;
+    }
+
+    /* Did we find any clusters matching the spec? */
+    if (! found) {
+	pmsprintf(mess, sizeof(mess),
+		  "No matching cluster for new label %s", buf);
+	yywarn(mess);
+    }
+}
+
+void
+new_item_label(int item)
+{
+    labelspec_t		*lp;
+    int			sts;
+    int			found = 0;
+    __pmContext		*ctxp;
+    __pmHashCtl		*hcp;
+    __pmHashNode	*node;
+    char		buf[PM_MAXLABELJSONLEN] = "";
+
+    /*
+     * Ignore the change specs which were previously identified and instead
+     * search the metadata for metrics in the given domain.
+     * Create or re-use the change record for each one found. 
+     */
+    deactivate_labels();
+
+    ctxp = __pmHandleToPtr(pmWhichContext());
+    assert(ctxp != NULL);
+    /*
+     * Note: This application is single threaded, and once we have ctxp
+     *	     the associated __pmContext will not move and will only be
+     *	     accessed or modified synchronously either here or in libpcp.
+     *	     We unlock the context so that it can be locked as required
+     *	     within libpcp.
+     */
+    PM_UNLOCK(ctxp->c_lock);
+
+    /* Prepare the JSON for the new label. */
+    pmsprintf(buf, sizeof(buf), "{%s:%s}",
+	      current_label_name, current_label_value);
+
+    hcp = &ctxp->c_archctl->ac_log->l_hashpmid;
+    for (node = __pmHashWalk(hcp, PM_HASH_WALK_START);
+	 node != NULL;
+	 node = __pmHashWalk(hcp, PM_HASH_WALK_NEXT)) {
+	if (pmID_domain(node->key) != pmID_domain(item))
+	    continue;
+	if (current_star_metric < 2) {
+	    if (pmID_cluster(node->key) != pmID_cluster(item))
+		continue;
+	    if (! current_star_metric && (pmID)(node->key) != (pmID)item)
+		continue;
+	}
+
+	/*
+	 * A metric with this pmID exists.
+	 * Add the new label to the generic label change spec for the
+	 * identified item. Search for an existing one first.
+	 */
+	found = 1;
+	for (lp = label_root; lp != NULL; lp = lp->l_next) {
+	    if (lp->old_type != PM_LABEL_ITEM)
+		continue;
+	    if ((pmID)(lp->old_id) != (pmID)(node->key))
+		continue;
+	    if (lp->old_label == NULL)
+		break;
+	}
+
+	if (lp == NULL)
+	    lp = create_label(PM_LABEL_ITEM, (pmID)node->key, 0, NULL, NULL);
+
+	/* Add the new label to the label change spec. */
+	if ((sts = __pmAddLabels(&lp->new_labels, buf, PM_LABEL_ITEM)) < 0) {
+	    pmsprintf(mess, sizeof(mess),
+		      "Unable to add new metric item label %s: %s",
+		      buf, pmErrStr(sts));
+	    yyerror(mess);
+	}
+	lp->new_labels->inst = 0;
+	lp->flags |= LABEL_NEW;
+
+	/* Do we need to look for more items? */
+	if (! current_star_metric)
+	    break;
+    }
+
+    /* Did we find any items matching the spec? */
+    if (! found) {
+	pmsprintf(mess, sizeof(mess),
+		  "No matching metric for new label %s", buf);
+	yywarn(mess);
+    }
+}
+
+void
+new_indom_label(int indom)
+{
+    labelspec_t		*lp;
+    int			sts;
+    int			found = 0;
+    __pmContext		*ctxp;
+    __pmHashCtl		*hcp;
+    __pmHashNode	*node;
+    char		buf[PM_MAXLABELJSONLEN] = "";
+
+    /*
+     * Ignore the change specs which were previously identified and instead
+     * search the metadata for metrics in the given domain.
+     * Create or re-use the change record for each one found. 
+     */
+    deactivate_labels();
+
+    ctxp = __pmHandleToPtr(pmWhichContext());
+    assert(ctxp != NULL);
+    /*
+     * Note: This application is single threaded, and once we have ctxp
+     *	     the associated __pmContext will not move and will only be
+     *	     accessed or modified synchronously either here or in libpcp.
+     *	     We unlock the context so that it can be locked as required
+     *	     within libpcp.
+     */
+    PM_UNLOCK(ctxp->c_lock);
+
+    /* Prepare the JSON for the new label. */
+    pmsprintf(buf, sizeof(buf), "{%s:%s}",
+	      current_label_name, current_label_value);
+
+    hcp = &ctxp->c_archctl->ac_log->l_hashindom;
+    for (node = __pmHashWalk(hcp, PM_HASH_WALK_START);
+	 node != NULL;
+	 node = __pmHashWalk(hcp, PM_HASH_WALK_NEXT)) {
+	if (pmInDom_domain(node->key) != pmInDom_domain(indom))
+	    continue;
+	if (! current_star_indom && 
+	    pmInDom_serial(node->key) != pmInDom_serial(indom))
+	    continue;
+
+	/*
+	 * A metric in this indom exists.
+	 * Add the new label to the generic label change spec for the
+	 * identified indom. Search for an existing one first.
+	 */
+	found = 1;
+	for (lp = label_root; lp != NULL; lp = lp->l_next) {
+	    if (lp->old_type != PM_LABEL_INDOM)
+		continue;
+	    if (pmInDom_domain(lp->old_id) != pmInDom_domain((pmInDom)(node->key)))
+		continue;
+	    if (pmInDom_serial(lp->old_id) != pmInDom_serial((pmInDom)(node->key)))
+		continue;
+	    if (lp->old_instance != -1)
+		continue;
+	    if (lp->old_label == NULL)
+		break;
+	}
+
+	if (lp == NULL) {
+	    pmInDom current_indom =
+		pmInDom_build(pmInDom_domain(node->key), pmInDom_serial(node->key));
+	    lp = create_label(PM_LABEL_INDOM, current_indom, 0, NULL, NULL);
+	}
+
+	/* Add the new label to the label change spec. */
+	if ((sts = __pmAddLabels(&lp->new_labels, buf, PM_LABEL_INDOM)) < 0) {
+	    pmsprintf(mess, sizeof(mess),
+		      "Unable to add new indom label %s: %s",
+		      buf, pmErrStr(sts));
+	    yyerror(mess);
+	}
+	lp->new_labels->inst = 0;
+	lp->flags |= LABEL_NEW;
+
+	/* Do we need to look for more indoms? */
+	if (! current_star_indom)
+	    break;
+    }
+
+    /* Did we find any indoms matching the spec? */
+    if (! found) {
+	pmsprintf(mess, sizeof(mess),
+		  "No matching indom for new label %s", buf);
+	yywarn(mess);
+    }
+}
+
+void
+new_indom_instance_label(int indom)
+{
+    labelspec_t		*lp;
+    int			sts;
+    int			found = 0;
+    __pmContext		*ctxp;
+    __pmHashCtl		*hcp;
+    __pmHashNode	*node;
+    __pmLogInDom	*idp;
+    char		buf[PM_MAXLABELJSONLEN] = "";
+
+    /*
+     * Ignore the change specs which were previously identified and instead
+     * search the metadata for metrics in the given domain.
+     * Create or re-use the change record for each one found. 
+     */
+    deactivate_labels();
+
+    ctxp = __pmHandleToPtr(pmWhichContext());
+    assert(ctxp != NULL);
+    /*
+     * Note: This application is single threaded, and once we have ctxp
+     *	     the associated __pmContext will not move and will only be
+     *	     accessed or modified synchronously either here or in libpcp.
+     *	     We unlock the context so that it can be locked as required
+     *	     within libpcp.
+     */
+    PM_UNLOCK(ctxp->c_lock);
+
+    /* Prepare the JSON for the new label. */
+    pmsprintf(buf, sizeof(buf), "{%s:%s}",
+	      current_label_name, current_label_value);
+
+    hcp = &ctxp->c_archctl->ac_log->l_hashindom;
+    for (node = __pmHashWalk(hcp, PM_HASH_WALK_START);
+	 node != NULL;
+	 node = __pmHashWalk(hcp, PM_HASH_WALK_NEXT)) {
+	if (pmInDom_domain(node->key) != pmInDom_domain(indom))
+	    continue;
+	if (! current_star_indom && 
+	    pmInDom_serial(node->key) != pmInDom_serial(indom))
+	    continue;
+
+	/*
+	 * A metric in this indom exists.
+	 * Add the new label to the generic label change specs for the
+	 * identified indom instances. Search for existing ones first.
+	 */
+	for (idp = (__pmLogInDom *)node->data; idp != NULL; idp = idp->next) {
+	    int indom_ix;
+	    for (indom_ix = 0; indom_ix < idp->numinst; ++indom_ix) {
+		int instance = idp->instlist[indom_ix];
+		if (current_label_instance != -1 && instance != current_label_instance)
+		    continue;
+		found = 1;
+		for (lp = label_root; lp != NULL; lp = lp->l_next) {
+		    if (lp->old_type != PM_LABEL_INSTANCES)
+			continue;
+		    if (pmInDom_domain(lp->old_id) != pmInDom_domain((pmInDom)(node->key)))
+			continue;
+		    if (pmInDom_serial(lp->old_id) != pmInDom_serial((pmInDom)(node->key)))
+			continue;
+		    if (lp->old_instance != instance)
+			continue;
+		    if (lp->old_label == NULL)
+			break;
+		}
+
+		if (lp == NULL) {
+		    pmInDom current_indom =
+			pmInDom_build(pmInDom_domain(node->key), pmInDom_serial(node->key));
+		    lp = create_label(PM_LABEL_INSTANCES, current_indom,
+				      instance, NULL, NULL);
+		}
+
+		/* Add the new label to the label change spec. */
+		if ((sts = __pmAddLabels(&lp->new_labels, buf, PM_LABEL_INSTANCES)) < 0) {
+		    pmsprintf(mess, sizeof(mess),
+			      "Unable to add new indom instance label %s: %s",
+			      buf, pmErrStr(sts));
+		    yyerror(mess);
+		}
+		lp->new_labels->inst = instance;
+		lp->flags |= LABEL_NEW;
+	    }
+	}
+
+	/* Do we need to look for more indoms? */
+	if (! current_star_indom)
+	    break;
+    }
+
+    /* Did we find any indom instances matching the spec? */
+    if (! found) {
+	pmsprintf(mess, sizeof(mess),
+		  "No matching indom instance for new label %s", buf);
+	yywarn(mess);
+    }
+}
+
 %}
 
 %union {
@@ -239,9 +860,21 @@ walk_text(int mode, int flag, char *which, int dupok)
 	TOK_TEXT
 	TOK_ONELINE
 	TOK_HELP
-	TOK_ALL
+	TOK_TEXT_STAR
+	TOK_LABEL
+	TOK_CONTEXT
+	TOK_LABEL_STAR
+	TOK_DOMAIN
+	TOK_CLUSTER
+	TOK_ITEM
+	TOK_INSTANCES
+	TOK_INSTANCE
+	TOK_NEW
+	TOK_VALUE
 
-%token<str>	TOK_GNAME TOK_NUMBER TOK_STRING TOK_NL_STRING TOK_HNAME TOK_FLOAT
+%token<str>	TOK_GNAME TOK_NUMBER TOK_STRING TOK_TEXT_STRING TOK_HNAME TOK_FLOAT
+%token<str>	TOK_JSON_STRING TOK_JSON_NUMBER
+%token<str>	TOK_JSON_TRUE TOK_JSON_FALSE TOK_JSON_NULL
 %token<str>	TOK_INDOM_STAR TOK_PMID_INT TOK_PMID_STAR
 %token<ival>	TOK_TYPE_NAME TOK_SEM_NAME TOK_SPACE_NAME TOK_TIME_NAME
 %token<ival>	TOK_COUNT_NAME TOK_OUTPUT_TYPE
@@ -249,9 +882,9 @@ walk_text(int mode, int flag, char *which, int dupok)
 %type<str>	hname
 %type<indom>	indom_int null_or_indom
 %type<pmid>	pmid_int pmid_or_name
-%type<ival>	signnumber number rescaleopt duplicateopt texttype texttypes opttexttypes
+%type<ival>	signnumber number rescaleopt duplicateopt texttype texttypes opttexttypes pmid_domain pmid_cluster
 %type<dval>	float
-%type<str>	textstring
+%type<str>	textstring opttextvalue jsonname jsonvalue jsonnumber
 
 %%
 
@@ -266,6 +899,7 @@ spec		: globalspec
 		| indomspec
 		| metricspec
 		| textspec
+		| labelspec
 		;
 
 globalspec	: TOK_GLOBAL TOK_LBRACE globaloptlist TOK_RBRACE
@@ -1156,7 +1790,7 @@ textmetricorindomspec	: textmetricspec
 			| textindomspec
 			;
 
-textmetricspec	: TOK_METRIC pmid_or_name opttexttypes
+textmetricspec	: TOK_METRIC pmid_or_name opttexttypes opttextvalue
 		    {
 			__pmContext	*ctxp;
 			__pmHashCtl	*hcp1;
@@ -1220,7 +1854,7 @@ textmetricspec	: TOK_METRIC pmid_or_name opttexttypes
 					if (pmID_domain((pmID)(node2->key)) == star_domain &&
 					    (star_cluster == PM_ID_NULL ||
 					     star_cluster == pmID_cluster((pmID)(node2->key)))) {
-					    current_textspec = start_text(this_type, (pmID)(node2->key));
+					    current_textspec = start_text(this_type, (pmID)(node2->key), $4);
 					    if (current_textspec) {
 						current_textspec->flags |= TEXT_ACTIVE;
 						++found;
@@ -1231,7 +1865,7 @@ textmetricspec	: TOK_METRIC pmid_or_name opttexttypes
 				    else {
 					/* Match the exact metric PMID. */
 					if ((pmID)(node2->key) == $2) {
-					    current_textspec = start_text(this_type, (pmID)(node2->key));
+					    current_textspec = start_text(this_type, (pmID)(node2->key), $4);
 					    if (current_textspec) {
 						current_textspec->flags |= TEXT_ACTIVE;
 						++found;
@@ -1268,12 +1902,18 @@ texttypes	: texttype
 		    { $$ = $1 | $2; } /* Accumulate */
 		;
 
-texttype	: TOK_ALL
+texttype	: TOK_TEXT_STAR
 		    { $$ = PM_TEXT_ONELINE | PM_TEXT_HELP; }
 		| TOK_HELP
 		    { $$ = PM_TEXT_HELP; }
 		| TOK_ONELINE
 		    { $$ = PM_TEXT_ONELINE; }
+		;
+
+opttextvalue	: textstring
+		    { $$ = $1; }
+		| /* nothing */
+		    { $$ = NULL; }
 		;
 
 opttextmetricoptlist	: textmetricoptlist
@@ -1377,11 +2017,11 @@ textmetricopt	: TOK_DELETE
 
 textstring	: TOK_STRING
 		    { $$ = $1; }
-		| TOK_NL_STRING
+		| TOK_TEXT_STRING
 		    { $$ = $1; }
 		;
 
-textindomspec	: TOK_INDOM indom_int opttexttypes
+textindomspec	: TOK_INDOM indom_int opttexttypes opttextvalue
 		    {
 			__pmContext	*ctxp;
 			__pmHashCtl	*hcp1;
@@ -1439,7 +2079,7 @@ textindomspec	: TOK_INDOM indom_int opttexttypes
 				    if (current_star_indom) {
 					/* Match the globbed metric spec and keep looking. */
 					if (pmInDom_domain((pmID)(node2->key)) == star_domain) {
-					    current_textspec = start_text(this_type, (pmID)(node2->key));
+					    current_textspec = start_text(this_type, (pmID)(node2->key), $4);
 					    if (current_textspec) {
 						current_textspec->flags |= TEXT_ACTIVE;
 						++found;
@@ -1449,7 +2089,7 @@ textindomspec	: TOK_INDOM indom_int opttexttypes
 				    else {
 					/* Match the exact indom id. */
 					if ((pmID)(node2->key) == $2) {
-					    current_textspec = start_text(this_type, (pmID)(node2->key));
+					    current_textspec = start_text(this_type, (pmID)(node2->key), $4);
 					    if (current_textspec) {
 						current_textspec->flags |= TEXT_ACTIVE;
 						++found;
@@ -1549,6 +2189,1216 @@ textindomopt	: TOK_DELETE
 				}
 			    }
 			}
+		    }
+		;
+
+labelspec	: TOK_LABEL labelcontextormetricorindomspec
+		;
+
+labelcontextormetricorindomspec	: labelcontextspec
+				| labeldomainspec
+				| labelclusterspec
+				| labelitemspec
+				| labelindomspec
+				| labelinstancesspec
+				;
+
+labelcontextspec	: TOK_CONTEXT optlabeldetails
+		    {
+			__pmContext	*ctxp;
+			__pmHashCtl	*hcp1;
+			__pmHashNode	*node1;
+			int		found = 0;
+
+			ctxp = __pmHandleToPtr(pmWhichContext());
+			assert(ctxp != NULL);
+    /*
+     * Note: This application is single threaded, and once we have ctxp,
+     *	     the associated __pmContext will not move and will only be
+     *	     accessed or modified synchronously either here or in libpcp.
+     *	     We unlock the context so that it can be locked as required
+     *	     within libpcp.
+     */
+			PM_UNLOCK(ctxp->c_lock);
+			
+			/* We're looking for context labels. */
+			current_labelspec = NULL;
+			hcp1 = &ctxp->c_archctl->ac_log->l_hashlabels;
+			for (node1 = __pmHashWalk(hcp1, PM_HASH_WALK_START);
+			     node1 != NULL;
+			     node1 = __pmHashWalk(hcp1, PM_HASH_WALK_NEXT)) {
+			    __pmHashCtl	*hcp2;
+			    __pmHashNode	*node2;
+			    int		this_type;
+
+			    /* Was this object type selected? */
+			    this_type = (int)(node1->key);
+			    if (this_type != PM_LABEL_CONTEXT)
+				continue;
+
+			    /*
+			     * Collect the label records associated with the specified
+			     * metric(s).
+			     */
+			    hcp2 = (__pmHashCtl *)(node1->data);
+			    for (node2 = __pmHashWalk(hcp2, PM_HASH_WALK_START);
+				 node2 != NULL;
+				 node2 = __pmHashWalk(hcp2, PM_HASH_WALK_NEXT)) {
+				/* We want all of the context labels. */
+				current_labelspec = start_label(this_type, (pmID)(node2->key), 0, NULL,
+								current_label_name, current_label_value);
+				if (current_labelspec) {
+				    current_labelspec->flags |= LABEL_ACTIVE;
+				    ++found;
+				}
+			    }
+			}
+			do_walk_label = found;
+		    }
+		  TOK_LBRACE optlabelcontextoptlist TOK_RBRACE
+		;
+
+optlabeldetails	: jsonname optlabelvalue
+		    { current_label_name = $1; }
+		| TOK_LABEL_STAR optlabelvalue
+		    { current_label_name = NULL; }
+		| /* nothing */
+		    {
+			current_label_name = NULL;
+			current_label_value = NULL;
+		    }
+		;
+
+jsonname	: TOK_JSON_STRING
+		    { $$ = $1; }
+		| TOK_STRING
+		    {
+			$$ = add_quotes($1);
+			free($1);
+		    }
+		;
+
+optlabelvalue	: jsonvalue
+		    { current_label_value = $1; }
+		| TOK_LABEL_STAR
+		    { current_label_value = NULL; }
+		| /* nothing */
+		    { current_label_value = NULL; }
+		;
+
+jsonvalue	: jsonname
+		    { $$ = $1; }
+		| jsonnumber
+		    { $$ = $1; }
+		| TOK_JSON_TRUE
+		    { $$ = $1; }
+		| TOK_JSON_FALSE
+		    { $$ = $1; }
+		| TOK_JSON_NULL
+		    { $$ = $1; }
+		;
+
+jsonnumber	: TOK_MINUS TOK_NUMBER
+		    {
+			$$ = dupcat("-", $2);
+			free($2);
+		    }
+		| TOK_NUMBER
+		    { $$ = $1; }
+		| TOK_MINUS TOK_JSON_NUMBER
+		    {
+			$$ = dupcat("-", $2);
+			free($2);
+		    }
+		| TOK_JSON_NUMBER
+		    { $$ = $1; }
+		;
+
+optlabelcontextoptlist	: labelcontextoptlist
+			| /* nothing */
+		    {
+			deactivate_labels();
+		    }
+			;
+
+labelcontextoptlist	: labelcontextopt
+			| labelcontextopt labelcontextoptlist
+			;
+
+labelcontextopt	: TOK_DELETE
+		    {
+			labelspec_t	*lp;
+			for (lp = walk_label(W_START, LABEL_DELETE, "delete", 0); lp != NULL; lp = walk_label(W_NEXT, LABEL_DELETE, "delete", 0)) {
+			    lp->flags |= LABEL_DELETE;
+			}
+		    }
+		| TOK_LABEL TOK_ASSIGN jsonname
+		    {
+			labelspec_t	*lp;
+			for (lp = walk_label(W_START, LABEL_CHANGE_LABEL, "label", 0); lp != NULL; lp = walk_label(W_NEXT, LABEL_CHANGE_LABEL, "label", 0)) {
+			    if (lp->new_label != NULL) {
+				pmsprintf(mess, sizeof(mess), "Duplicate label clause for context");
+				yyerror(mess);
+			    }
+			    if (lp->old_label != NULL &&
+				strcmp(lp->old_label, $3) == 0) {
+				/* no change ... */
+				if (wflag) {
+				    pmsprintf(mess, sizeof(mess), "Label for context: label: No change");
+				    yywarn(mess);
+				}
+				free($3);
+			    }
+			    else {
+				lp->new_label = $3;
+				lp->flags |= LABEL_CHANGE_LABEL;
+			    }
+			}
+		    }
+		;
+		| TOK_VALUE TOK_ASSIGN jsonvalue
+		    {
+			labelspec_t	*lp;
+			for (lp = walk_label(W_START, LABEL_CHANGE_VALUE, "value", 0); lp != NULL; lp = walk_label(W_NEXT, LABEL_CHANGE_VALUE, "value", 0)) {
+			    if (lp->new_value != NULL) {
+				pmsprintf(mess, sizeof(mess), "Duplicate value clause for cluster %d.%d", pmID_domain(lp->old_id), pmID_cluster(lp->old_id));
+				yyerror(mess);
+			    }
+			    if (lp->old_value != NULL &&
+				strcmp(lp->old_value, $3) == 0) {
+				/* no change ... */
+				if (wflag) {
+				    pmsprintf(mess, sizeof(mess), "Label for cluster %d.%d: value: No change", pmID_domain(lp->old_id), pmID_cluster(lp->old_id));
+				    yywarn(mess);
+				}
+				free($3);
+			    }
+			    else {
+				lp->new_value = $3;
+				lp->flags |= LABEL_CHANGE_VALUE;
+			    }
+			}
+		    }
+		;
+		| newlabelspec
+		    {
+			new_context_label();
+		    }
+		
+newlabelspec	: TOK_NEW jsonname jsonvalue
+		    {
+			/* The current label name and value must both NOT be specified. */
+			if (current_label_name || current_label_value) {
+			    pmsprintf(mess, sizeof(mess), "The target label name and value must both not be specified for a NEW label and will be ignored");
+			    yywarn(mess);
+			    if (current_label_name)
+				free(current_label_name);
+			    if (current_label_value)
+				free(current_label_value);
+			}
+			current_label_name = $2;
+			current_label_value = $3;
+		    }
+
+labeldomainspec	: TOK_DOMAIN pmid_domain optlabeldetails
+		    {
+			__pmContext	*ctxp;
+			__pmHashCtl	*hcp1;
+			__pmHashNode	*node1;
+			int		 found = 0;
+
+			ctxp = __pmHandleToPtr(pmWhichContext());
+			assert(ctxp != NULL);
+    /*
+     * Note: This application is single threaded, and once we have ctxp,
+     *	     the associated __pmContext will not move and will only be
+     *	     accessed or modified synchronously either here or in libpcp.
+     *	     We unlock the context so that it can be locked as required
+     *	     within libpcp.
+     */
+			PM_UNLOCK(ctxp->c_lock);
+			
+			current_labelspec = NULL;
+			assert ($2 != PM_ID_NULL);
+			current_label_id = $2;
+			    
+			/* We're looking for domain labels. */
+			hcp1 = &ctxp->c_archctl->ac_log->l_hashlabels;
+			for (node1 = __pmHashWalk(hcp1, PM_HASH_WALK_START);
+			     node1 != NULL;
+			     node1 = __pmHashWalk(hcp1, PM_HASH_WALK_NEXT)) {
+			    __pmHashCtl	*hcp2;
+			    __pmHashNode	*node2;
+			    int		this_type;
+
+			    /* Was this object type selected? */
+			    this_type = (int)(node1->key);
+			    if (this_type != PM_LABEL_DOMAIN)
+				continue;
+
+			    /*
+			     * Collect the label records associated with the specified
+			     * metric domain.
+			     */
+			    hcp2 = (__pmHashCtl *)(node1->data);
+			    for (node2 = __pmHashWalk(hcp2, PM_HASH_WALK_START);
+				 node2 != NULL;
+				 node2 = __pmHashWalk(hcp2, PM_HASH_WALK_NEXT)) {
+				/* Match the exact metric domain. */
+				if ((pmID)(node2->key) == $2) {
+				    current_labelspec = start_label(this_type, (pmID)(node2->key), 0, NULL,
+								    current_label_name, current_label_value);
+				    if (current_labelspec) {
+					current_labelspec->flags |= LABEL_ACTIVE;
+					++found;
+				    }
+				}
+			    }
+			}
+			do_walk_label = found;
+		    }
+		  TOK_LBRACE optlabeldomainoptlist TOK_RBRACE
+		;
+
+pmid_domain	: TOK_NUMBER
+		    {
+			int	domain;
+			int	sts;
+			sts = sscanf($1, "%d", &domain);
+			assert(sts == 1);
+			if (domain < 1 || domain > DYNAMIC_PMID) {
+			    pmsprintf(mess, sizeof(mess), "Illegal domain field (%d) for pmid", domain);
+			    yyerror(mess);
+			}
+			else if (domain == DYNAMIC_PMID) {
+			    pmsprintf(mess, sizeof(mess), "Dynamic metric domain field (%d) for pmid", domain);
+			    yywarn(mess);
+			}
+			current_star_metric = 0;
+			free($1);
+			$$ = domain;
+		    }
+		;
+
+optlabeldomainoptlist	: labeldomainoptlist
+			| /* nothing */
+		    {
+			deactivate_labels();
+		    }
+			;
+
+labeldomainoptlist	: labeldomainopt
+			| labeldomainopt labeldomainoptlist
+			;
+
+labeldomainopt	: TOK_DELETE
+		    {
+			labelspec_t	*lp;
+			for (lp = walk_label(W_START, LABEL_DELETE, "delete", 0); lp != NULL; lp = walk_label(W_NEXT, LABEL_DELETE, "delete", 0)) {
+			    lp->flags |= LABEL_DELETE;
+			}
+		    }
+		| TOK_DOMAIN TOK_ASSIGN TOK_NUMBER
+		    {
+			labelspec_t	*lp;
+			int		domain;
+			int		sts;
+			sts = sscanf($3, "%d", &domain);
+			assert(sts == 1);
+			free($3);
+			for (lp = walk_label(W_START, LABEL_CHANGE_ID, "id", 0); lp != NULL; lp = walk_label(W_NEXT, LABEL_CHANGE_ID, "id", 0)) {
+			    if (domain == lp->old_id) {
+				/* no change ... */
+				if (wflag) {
+				    pmsprintf(mess, sizeof(mess), "Label for metric domain: %d: No change", lp->old_id);
+				    yywarn(mess);
+				}
+			    }
+			    else {
+				/*
+				 * No need to check for conflicts. Multiple label set records for
+				 * the same domain are ok.
+				 */
+				lp->new_id = domain;
+				lp->flags |= LABEL_CHANGE_ID;
+			    }
+			}
+		    }
+		| TOK_LABEL TOK_ASSIGN jsonname
+		    {
+			labelspec_t	*lp;
+			for (lp = walk_label(W_START, LABEL_CHANGE_LABEL, "label", 0); lp != NULL; lp = walk_label(W_NEXT, LABEL_CHANGE_LABEL, "label", 0)) {
+			    if (lp->new_label != NULL) {
+				pmsprintf(mess, sizeof(mess), "Duplicate label clause for domain %d", lp->old_id);
+				yyerror(mess);
+			    }
+			    if (lp->old_label != NULL &&
+				strcmp(lp->old_label, $3) == 0) {
+				/* no change ... */
+				if (wflag) {
+				    pmsprintf(mess, sizeof(mess), "Label for domain %d: label: No change", lp->old_id);
+				    yywarn(mess);
+				}
+				free($3);
+			    }
+			    else {
+				lp->new_label = $3;
+				lp->flags |= LABEL_CHANGE_LABEL;
+			    }
+			}
+		    }
+		;
+		| TOK_VALUE TOK_ASSIGN jsonvalue
+		    {
+			labelspec_t	*lp;
+			for (lp = walk_label(W_START, LABEL_CHANGE_VALUE, "value", 0); lp != NULL; lp = walk_label(W_NEXT, LABEL_CHANGE_VALUE, "value", 0)) {
+			    if (lp->new_value != NULL) {
+				pmsprintf(mess, sizeof(mess), "Duplicate value clause for cluster %d.%d", pmID_domain(lp->old_id), pmID_cluster(lp->old_id));
+				yyerror(mess);
+			    }
+			    if (lp->old_value != NULL &&
+				strcmp(lp->old_value, $3) == 0) {
+				/* no change ... */
+				if (wflag) {
+				    pmsprintf(mess, sizeof(mess), "Label for cluster %d.%d: value: No change", pmID_domain(lp->old_id), pmID_cluster(lp->old_id));
+				    yywarn(mess);
+				}
+				free($3);
+			    }
+			    else {
+				lp->new_value = $3;
+				lp->flags |= LABEL_CHANGE_VALUE;
+			    }
+			}
+		    }
+		;
+		| newlabelspec
+		    {
+			new_domain_label(current_label_id);
+		    }
+		;
+
+labelclusterspec	: TOK_CLUSTER pmid_cluster optlabeldetails
+		    {
+			__pmContext	*ctxp;
+			__pmHashCtl	*hcp1;
+			__pmHashNode	*node1;
+			int		found = 0;
+
+			ctxp = __pmHandleToPtr(pmWhichContext());
+			assert(ctxp != NULL);
+    /*
+     * Note: This application is single threaded, and once we have ctxp,
+     *	     the associated __pmContext will not move and will only be
+     *	     accessed or modified synchronously either here or in libpcp.
+     *	     We unlock the context so that it can be locked as required
+     *	     within libpcp.
+     */
+			PM_UNLOCK(ctxp->c_lock);
+			
+			current_labelspec = NULL;
+			assert ($2 != PM_ID_NULL);
+			current_label_id = $2;
+			    
+			if (current_star_metric) {
+			    /* Set up for metrics specified using globbing. */
+			    star_domain = pmID_domain($2);
+			    star_cluster = PM_ID_NULL;
+			}
+
+			/* We're looking for cluster labels. */
+			hcp1 = &ctxp->c_archctl->ac_log->l_hashlabels;
+			for (node1 = __pmHashWalk(hcp1, PM_HASH_WALK_START);
+			     node1 != NULL;
+			     node1 = __pmHashWalk(hcp1, PM_HASH_WALK_NEXT)) {
+			    __pmHashCtl		*hcp2;
+			    __pmHashNode	*node2;
+			    int			this_type;
+
+			    /* Was this object type selected? */
+			    this_type = (int)(node1->key);
+			    if (this_type != PM_LABEL_CLUSTER)
+				continue;
+
+			    /*
+			     * Collect the label records associated with the specified
+			     * metric(s).
+			     */
+			    hcp2 = (__pmHashCtl *)(node1->data);
+			    for (node2 = __pmHashWalk(hcp2, PM_HASH_WALK_START);
+				 node2 != NULL;
+				 node2 = __pmHashWalk(hcp2, PM_HASH_WALK_NEXT)) {
+				if (current_star_metric) {
+				    /* Match the globbed cluster spec and keep looking. */
+				    if (pmID_domain((pmID)(node2->key)) == star_domain) {
+					current_labelspec = start_label(this_type, (pmID)(node2->key), 0, NULL,
+									current_label_name, current_label_value);
+					if (current_labelspec) {
+					    current_labelspec->flags |= LABEL_ACTIVE;
+					    ++found;
+					}
+				    }
+				}
+				else {
+				    /* Match the exact cluster spec. */
+				    if ((pmID)(node2->key) == $2) {
+					current_labelspec = start_label(this_type, (pmID)(node2->key), 0, NULL,
+									current_label_name, current_label_value);
+					if (current_labelspec) {
+					    current_labelspec->flags |= LABEL_ACTIVE;
+					    ++found;
+					}
+				    }
+				}
+			    }
+			}
+			do_walk_label = found;
+		    }
+		  TOK_LBRACE optlabelclusteroptlist TOK_RBRACE
+		;
+
+pmid_cluster	: TOK_FLOAT
+		    {
+			int	domain;
+			int	cluster;
+			int	sts;
+			sts = sscanf($1, "%d.%d", &domain, &cluster);
+			assert(sts == 2);
+			if (domain < 1 || domain > DYNAMIC_PMID) {
+			    pmsprintf(mess, sizeof(mess), "Illegal domain field (%d) for pmid", domain);
+			    yyerror(mess);
+			}
+			else if (domain == DYNAMIC_PMID) {
+			    pmsprintf(mess, sizeof(mess), "Dynamic metric domain field (%d) for pmid", domain);
+			    yywarn(mess);
+			}
+			if (cluster < 0 || cluster >= 4096) {
+			    pmsprintf(mess, sizeof(mess), "Illegal cluster field (%d) for pmid", cluster);
+			    yyerror(mess);
+			}
+			current_star_metric = 0;
+			free($1);
+			$$ = pmID_build(domain, cluster, 0);
+		    }
+		| TOK_INDOM_STAR
+		    {
+			int	domain;
+			int	sts;
+			sts = sscanf($1, "%d.", &domain);
+			assert (sts == 1);
+			if (domain < 1 || domain > DYNAMIC_PMID) {
+			    pmsprintf(mess, sizeof(mess), "Illegal domain field (%d) for pmid", domain);
+			    yyerror(mess);
+			}
+			else if (domain == DYNAMIC_PMID) {
+			    pmsprintf(mess, sizeof(mess), "Dynamic metric domain field (%d) for pmid", domain);
+			    yywarn(mess);
+			}
+			current_star_metric = 1;
+			free($1);
+			$$ = pmID_build(domain, 0, 0);
+		    }
+		;
+
+optlabelclusteroptlist	: labelclusteroptlist
+			| /* nothing */
+		    {
+			deactivate_labels();
+		    }
+			;
+
+labelclusteroptlist	: labelclusteropt
+			| labelclusteropt labelclusteroptlist
+			;
+
+labelclusteropt	: TOK_DELETE
+		    {
+			labelspec_t	*lp;
+			for (lp = walk_label(W_START, LABEL_DELETE, "delete", 0); lp != NULL; lp = walk_label(W_NEXT, LABEL_DELETE, "delete", 0)) {
+			    lp->flags |= LABEL_DELETE;
+			}
+		    }
+		| TOK_CLUSTER TOK_ASSIGN pmid_cluster
+		    {
+			labelspec_t	*lp;
+			int		cluster;
+			for (lp = walk_label(W_START, LABEL_CHANGE_ID, "id", 0); lp != NULL; lp = walk_label(W_NEXT, LABEL_CHANGE_ID, "id", 0)) {
+			    if (current_star_metric)
+				cluster = pmID_build(pmID_domain($3), pmID_cluster(lp->old_id), PM_ID_NULL);
+			    else
+				cluster = pmID_build(pmID_domain($3), pmID_cluster($3), PM_ID_NULL);
+			    if (cluster == lp->old_id) {
+				/* no change ... */
+				if (wflag) {
+				    pmsprintf(mess, sizeof(mess), "Label for cluster: %d.%d: No change", pmID_domain(lp->old_id), pmID_cluster(lp->old_id));
+				    yywarn(mess);
+				}
+			    }
+			    else {
+				/*
+				 * No need to check for conflicts. Multiple label set records for
+				 * the same cluster are ok.
+				 */
+				lp->new_id = cluster;
+				lp->flags |= LABEL_CHANGE_ID;
+			    }
+			}
+		    }
+		| TOK_LABEL TOK_ASSIGN jsonname
+		    {
+			labelspec_t	*lp;
+			for (lp = walk_label(W_START, LABEL_CHANGE_LABEL, "label", 0); lp != NULL; lp = walk_label(W_NEXT, LABEL_CHANGE_LABEL, "label", 0)) {
+			    if (lp->new_label != NULL) {
+				pmsprintf(mess, sizeof(mess), "Duplicate label clause for cluster %d.%d", pmID_domain(lp->old_id), pmID_cluster(lp->old_id));
+				yyerror(mess);
+			    }
+			    if (lp->old_label != NULL &&
+				strcmp(lp->old_label, $3) == 0) {
+				/* no change ... */
+				if (wflag) {
+				    pmsprintf(mess, sizeof(mess), "Label for cluster %d.%d: label: No change", pmID_domain(lp->old_id), pmID_cluster(lp->old_id));
+				    yywarn(mess);
+				}
+				free($3);
+			    }
+			    else {
+				lp->new_label = $3;
+				lp->flags |= LABEL_CHANGE_LABEL;
+			    }
+			}
+		    }
+		;
+		| TOK_VALUE TOK_ASSIGN jsonvalue
+		    {
+			labelspec_t	*lp;
+			for (lp = walk_label(W_START, LABEL_CHANGE_VALUE, "value", 0); lp != NULL; lp = walk_label(W_NEXT, LABEL_CHANGE_VALUE, "value", 0)) {
+			    if (lp->new_value != NULL) {
+				pmsprintf(mess, sizeof(mess), "Duplicate value clause for cluster %d.%d", pmID_domain(lp->old_id), pmID_cluster(lp->old_id));
+				yyerror(mess);
+			    }
+			    if (lp->old_value != NULL &&
+				strcmp(lp->old_value, $3) == 0) {
+				/* no change ... */
+				if (wflag) {
+				    pmsprintf(mess, sizeof(mess), "Label for cluster %d.%d: value: No change", pmID_domain(lp->old_id), pmID_cluster(lp->old_id));
+				    yywarn(mess);
+				}
+				free($3);
+			    }
+			    else {
+				lp->new_value = $3;
+				lp->flags |= LABEL_CHANGE_VALUE;
+			    }
+			}
+		    }
+		;
+		| newlabelspec
+		    {
+			new_cluster_label(current_label_id);
+		    }
+		;
+
+labelitemspec	: TOK_ITEM pmid_or_name optlabeldetails
+		    {
+			__pmContext	*ctxp;
+			__pmHashCtl	*hcp1;
+			__pmHashNode	*node1;
+
+			ctxp = __pmHandleToPtr(pmWhichContext());
+			assert(ctxp != NULL);
+    /*
+     * Note: This application is single threaded, and once we have ctxp,
+     *	     the associated __pmContext will not move and will only be
+     *	     accessed or modified synchronously either here or in libpcp.
+     *	     We unlock the context so that it can be locked as required
+     *	     within libpcp.
+     */
+			PM_UNLOCK(ctxp->c_lock);
+			
+			current_labelspec = NULL;
+			current_label_id = $2;
+			if ($2 == PM_ID_NULL) {
+			    /* Metric referenced by name is not in the archive */
+			    do_walk_label = 0;
+			}
+			else {
+			    int found = 0;
+			    
+			    if (current_star_metric) {
+				/* Set up for metrics specified using globbing. */
+				star_domain = pmID_domain($2);
+				if (current_star_metric == 1)
+				    star_cluster = pmID_cluster($2);
+				else
+				    star_cluster = PM_ID_NULL;
+			    }
+
+			    /* We're looking for item labels. */
+			    hcp1 = &ctxp->c_archctl->ac_log->l_hashlabels;
+			    for (node1 = __pmHashWalk(hcp1, PM_HASH_WALK_START);
+				 node1 != NULL;
+				 node1 = __pmHashWalk(hcp1, PM_HASH_WALK_NEXT)) {
+				__pmHashCtl	*hcp2;
+				__pmHashNode	*node2;
+				int		this_type;
+
+				/* Was this object type selected? */
+				this_type = (int)(node1->key);
+				if (this_type != PM_LABEL_ITEM)
+				    continue;
+
+				/*
+				 * Collect the label records associated with the specified
+				 * metric(s).
+				 */
+				hcp2 = (__pmHashCtl *)(node1->data);
+				for (node2 = __pmHashWalk(hcp2, PM_HASH_WALK_START);
+				     node2 != NULL;
+				     node2 = __pmHashWalk(hcp2, PM_HASH_WALK_NEXT)) {
+				    if (current_star_metric) {
+					/* Match the globbed metric spec and keep looking. */
+					if (pmID_domain((pmID)(node2->key)) == star_domain &&
+					    (star_cluster == PM_ID_NULL ||
+					     star_cluster == pmID_cluster((pmID)(node2->key)))) {
+					    current_labelspec = start_label(this_type, (pmID)(node2->key), 0, NULL,
+									    current_label_name, current_label_value);
+					    if (current_labelspec) {
+						current_labelspec->flags |= LABEL_ACTIVE;
+						++found;
+					    }
+
+					}
+				    }
+				    else {
+					/* Match the exact metric PMID. */
+					if ((pmID)(node2->key) == $2) {
+					    current_labelspec = start_label(this_type, (pmID)(node2->key), 0, NULL,
+									    current_label_name, current_label_value);
+					    if (current_labelspec) {
+						current_labelspec->flags |= LABEL_ACTIVE;
+						++found;
+					    }
+					}
+				    }
+				}
+			    }
+			    do_walk_label = found;
+			}
+		    }
+		  TOK_LBRACE optlabelitemoptlist TOK_RBRACE
+		;
+
+optlabelitemoptlist	: labelitemoptlist
+			| /* nothing */
+		    {
+			deactivate_labels();
+		    }
+			;
+
+labelitemoptlist	: labelitemopt
+			| labelitemopt labelitemoptlist
+			;
+
+labelitemopt	: TOK_DELETE
+		    {
+			labelspec_t	*lp;
+			for (lp = walk_label(W_START, LABEL_DELETE, "delete", 0); lp != NULL; lp = walk_label(W_NEXT, LABEL_DELETE, "delete", 0)) {
+			    lp->flags |= LABEL_DELETE;
+			}
+		    }
+		| TOK_ITEM TOK_ASSIGN pmid_int
+		    {
+			labelspec_t	*lp;
+			pmID		pmid;
+			for (lp = walk_label(W_START, LABEL_CHANGE_ID, "id", 0); lp != NULL; lp = walk_label(W_NEXT, LABEL_CHANGE_ID, "id", 0)) {
+			    if (current_star_metric == 1)
+				pmid = pmID_build(pmID_domain($3), pmID_cluster($3), pmID_item(lp->old_id));
+			    else if (current_star_metric == 2)
+				pmid = pmID_build(pmID_domain($3), pmID_cluster(lp->old_id), pmID_item(lp->old_id));
+			    else
+				pmid = $3;
+			    if (pmid == lp->old_id) {
+				/* no change ... */
+				if (wflag) {
+				    pmsprintf(mess, sizeof(mess), "Label for metric: %s: item: No change", pmIDStr(lp->old_id));
+				    yywarn(mess);
+				}
+			    }
+			    else {
+				/*
+				 * No need to check for conflicts. Multiple label set records for
+				 * the same pmid are ok.
+				 */
+				lp->new_id = pmid;
+				lp->flags |= LABEL_CHANGE_ID;
+			    }
+			}
+		    }
+		| TOK_LABEL TOK_ASSIGN jsonname
+		    {
+			labelspec_t	*lp;
+			for (lp = walk_label(W_START, LABEL_CHANGE_LABEL, "label", 0); lp != NULL; lp = walk_label(W_NEXT, LABEL_CHANGE_LABEL, "label", 0)) {
+			    if (lp->new_label != NULL) {
+				pmsprintf(mess, sizeof(mess), "Duplicate label clause for metric %s", pmIDStr(lp->old_id));
+				yyerror(mess);
+			    }
+			    if (lp->old_label != NULL &&
+				strcmp(lp->old_label, $3) == 0) {
+				/* no change ... */
+				if (wflag) {
+				    pmsprintf(mess, sizeof(mess), "Label for metric %s: label: No change", pmIDStr(lp->old_id));
+				    yywarn(mess);
+				}
+				free($3);
+			    }
+			    else {
+				lp->new_label = $3;
+				lp->flags |= LABEL_CHANGE_LABEL;
+			    }
+			}
+		    }
+		;
+		| TOK_VALUE TOK_ASSIGN jsonvalue
+		    {
+			labelspec_t	*lp;
+			for (lp = walk_label(W_START, LABEL_CHANGE_VALUE, "value", 0); lp != NULL; lp = walk_label(W_NEXT, LABEL_CHANGE_VALUE, "value", 0)) {
+			    if (lp->new_value != NULL) {
+				pmsprintf(mess, sizeof(mess), "Duplicate value clause for metric %s", pmIDStr(lp->old_id));
+				yyerror(mess);
+			    }
+			    if (lp->old_value != NULL &&
+				strcmp(lp->old_value, $3) == 0) {
+				/* no change ... */
+				if (wflag) {
+				    pmsprintf(mess, sizeof(mess), "Label for metric %s: value: No change", pmIDStr(lp->old_id));
+				    yywarn(mess);
+				}
+				free($3);
+			    }
+			    else {
+				lp->new_value = $3;
+				lp->flags |= LABEL_CHANGE_VALUE;
+			    }
+			}
+		    }
+		;
+		| newlabelspec
+		    {
+			new_item_label(current_label_id);
+		    }
+		;
+
+labelindomspec	: TOK_INDOM indom_int optlabeldetails
+		    {
+			__pmContext	*ctxp;
+			__pmHashCtl	*hcp1;
+			__pmHashNode	*node1;
+
+			ctxp = __pmHandleToPtr(pmWhichContext());
+			assert(ctxp != NULL);
+    /*
+     * Note: This application is single threaded, and once we have ctxp,
+     *	     the associated __pmContext will not move and will only be
+     *	     accessed or modified synchronously either here or in libpcp.
+     *	     We unlock the context so that it can be locked as required
+     *	     within libpcp.
+     */
+			PM_UNLOCK(ctxp->c_lock);
+			
+			current_labelspec = NULL;
+			current_label_id = $2;
+			if ($2 == PM_ID_NULL) {
+			    /* Indom is not in the archive */
+			    do_walk_label = 0;
+			}
+			else {
+			    int found = 0;
+			    
+			    if (current_star_indom) {
+				/* Set up for indoms specified using globbing. */
+				star_domain = pmInDom_domain($2);
+			    }
+
+			    /* We're looking for label sets for indom(s). */
+			    hcp1 = &ctxp->c_archctl->ac_log->l_hashlabels;
+			    for (node1 = __pmHashWalk(hcp1, PM_HASH_WALK_START);
+				 node1 != NULL;
+				 node1 = __pmHashWalk(hcp1, PM_HASH_WALK_NEXT)) {
+				__pmHashCtl	*hcp2;
+				__pmHashNode	*node2;
+				int		this_type;
+
+				/* Was this object type selected? */
+				this_type = (int)(node1->key);
+				if (this_type != PM_LABEL_INDOM)
+				    continue;
+
+				/*
+				 * Collect the label records associated with the specified
+				 * imdom(s).
+				 */
+				hcp2 = (__pmHashCtl *)(node1->data);
+				for (node2 = __pmHashWalk(hcp2, PM_HASH_WALK_START);
+				     node2 != NULL;
+				     node2 = __pmHashWalk(hcp2, PM_HASH_WALK_NEXT)) {
+				    if (current_star_indom) {
+					/* Match the globbed indom spec and keep looking. */
+					if (pmInDom_domain((pmID)(node2->key)) == star_domain) {
+					    current_labelspec = start_label(this_type, (pmID)(node2->key), 0, NULL,
+									    current_label_name, current_label_value);
+					    if (current_labelspec) {
+						current_labelspec->flags |= LABEL_ACTIVE;
+						++found;
+					    }
+					}
+				    }
+				    else {
+					/* Match the exact indom id. */
+					if ((pmID)(node2->key) == $2) {
+					    current_labelspec = start_label(this_type, (pmID)(node2->key), 0, NULL,
+									    current_label_name, current_label_value);
+					    if (current_labelspec) {
+						current_labelspec->flags |= LABEL_ACTIVE;
+						++found;
+					    }
+					}
+				    }
+				}
+			    }
+			    do_walk_label = found;
+			}
+		    }
+		  TOK_LBRACE optlabelindomoptlist TOK_RBRACE
+		;
+
+optlabelindomoptlist	: labelindomoptlist
+			| /* nothing */
+		    {
+			deactivate_labels();
+		    }
+			;
+
+labelindomoptlist	: labelindomopt
+			| labelindomopt labelindomoptlist
+			;
+
+labelindomopt	: TOK_DELETE
+		    {
+			labelspec_t	*lp;
+			for (lp = walk_label(W_START, LABEL_DELETE, "delete", 0); lp != NULL; lp = walk_label(W_NEXT, LABEL_DELETE, "delete", 0)) {
+			    lp->flags |= LABEL_DELETE;
+			}
+		    }
+		| TOK_INDOM TOK_ASSIGN indom_int
+		    {
+			labelspec_t	*lp;
+			for (lp = walk_label(W_START, LABEL_CHANGE_ID, "id", 0); lp != NULL; lp = walk_label(W_NEXT, LABEL_CHANGE_ID, "id", 0)) {
+			    pmInDom	indom;
+			    if (lp->new_id != lp->old_id) {
+				pmsprintf(mess, sizeof(mess), "Duplicate label clause for indom %s", pmInDomStr(lp->old_id));
+				yyerror(mess);
+			    }
+			    if (current_star_indom)
+				indom = pmInDom_build(pmInDom_domain($3), pmInDom_serial(lp->old_id));
+			    else
+				indom = $3;
+			    if (indom != lp->old_id) {
+				lp->new_id = indom;
+				lp->flags |= LABEL_CHANGE_ID;
+			    }
+			    else {
+				/* no change ... */
+				if (wflag) {
+				    pmsprintf(mess, sizeof(mess), "Label for instance domain %s: indom: No change", pmInDomStr(lp->old_id));
+				    yywarn(mess);
+				}
+			    }
+			}
+		    }
+		| TOK_LABEL TOK_ASSIGN jsonname
+		    {
+			labelspec_t	*lp;
+			for (lp = walk_label(W_START, LABEL_CHANGE_LABEL, "label", 0); lp != NULL; lp = walk_label(W_NEXT, LABEL_CHANGE_LABEL, "label", 0)) {
+			    if (lp->new_label != NULL) {
+				pmsprintf(mess, sizeof(mess), "Duplicate label clause for indom %s", pmInDomStr(lp->old_id));
+				yyerror(mess);
+			    }
+			    if (lp->old_label != NULL &&
+				strcmp(lp->old_label, $3) == 0) {
+				/* no change ... */
+				if (wflag) {
+				    pmsprintf(mess, sizeof(mess), "Label for instance domain %s: label: No change", pmInDomStr(lp->old_id));
+				    yywarn(mess);
+				}
+				free($3);
+			    }
+			    else {
+				lp->new_label = $3;
+				lp->flags |= LABEL_CHANGE_LABEL;
+			    }
+			}
+		    }
+		;
+		| TOK_VALUE TOK_ASSIGN jsonvalue
+		    {
+			labelspec_t	*lp;
+			for (lp = walk_label(W_START, LABEL_CHANGE_VALUE, "value", 0); lp != NULL; lp = walk_label(W_NEXT, LABEL_CHANGE_VALUE, "value", 0)) {
+			    if (lp->new_value != NULL) {
+				pmsprintf(mess, sizeof(mess), "Duplicate value clause for indom %s", pmInDomStr(lp->old_id));
+				yyerror(mess);
+			    }
+			    if (lp->old_value != NULL &&
+				strcmp(lp->old_value, $3) == 0) {
+				/* no change ... */
+				if (wflag) {
+				    pmsprintf(mess, sizeof(mess), "Label for instance domain %s: value: No change", pmInDomStr(lp->old_id));
+				    yywarn(mess);
+				}
+				free($3);
+			    }
+			    else {
+				lp->new_value = $3;
+				lp->flags |= LABEL_CHANGE_VALUE;
+			    }
+			}
+		    }
+		;
+		| newlabelspec
+		    {
+			new_indom_label(current_label_id);
+		    }
+		;
+
+labelinstancesspec	: TOK_INSTANCES indom_int optinstancelabeldetails
+		    {
+			__pmContext	*ctxp;
+			__pmHashCtl	*hcp1;
+			__pmHashNode	*node1;
+
+			ctxp = __pmHandleToPtr(pmWhichContext());
+			assert(ctxp != NULL);
+    /*
+     * Note: This application is single threaded, and once we have ctxp,
+     *	     the associated __pmContext will not move and will only be
+     *	     accessed or modified synchronously either here or in libpcp.
+     *	     We unlock the context so that it can be locked as required
+     *	     within libpcp.
+     */
+			PM_UNLOCK(ctxp->c_lock);
+			
+			current_labelspec = NULL;
+			current_label_id = $2;
+			if ($2 == PM_ID_NULL) {
+			    /* Indom is not in the archive */
+			    do_walk_label = 0;
+			}
+			else {
+			    int found = 0;
+			    
+			    if (current_star_indom) {
+				/* Set up for indoms specified using globbing. */
+				star_domain = pmInDom_domain($2);
+			    }
+
+			    /* We're looking for label sets for the instances of the indom(s). */
+			    hcp1 = &ctxp->c_archctl->ac_log->l_hashlabels;
+			    for (node1 = __pmHashWalk(hcp1, PM_HASH_WALK_START);
+				 node1 != NULL;
+				 node1 = __pmHashWalk(hcp1, PM_HASH_WALK_NEXT)) {
+				__pmHashCtl	*hcp2;
+				__pmHashNode	*node2;
+				int		this_type;
+
+				/* Was this object type selected? */
+				this_type = (int)(node1->key);
+				if (this_type != PM_LABEL_INSTANCES)
+				    continue;
+
+				/*
+				 * Collect the label records associated with the specified
+				 * indom instance(s).
+				 */
+				hcp2 = (__pmHashCtl *)(node1->data);
+				for (node2 = __pmHashWalk(hcp2, PM_HASH_WALK_START);
+				     node2 != NULL;
+				     node2 = __pmHashWalk(hcp2, PM_HASH_WALK_NEXT)) {
+				    if (current_star_indom) {
+					/* Match the globbed indom spec and keep looking. */
+					if (pmInDom_domain((pmID)(node2->key)) == star_domain) {
+					    current_labelspec = start_label(this_type, (pmID)(node2->key),
+									    current_label_instance, current_label_instance_name,
+									    current_label_name, current_label_value);
+					    if (current_labelspec) {
+						current_labelspec->flags |= LABEL_ACTIVE;
+						++found;
+					    }
+					}
+				    }
+				    else {
+					/* Match the exact indom id. */
+					if ((pmID)(node2->key) == $2) {
+					    current_labelspec = start_label(this_type, (pmID)(node2->key),
+									    current_label_instance, current_label_instance_name,
+									    current_label_name, current_label_value);
+					    if (current_labelspec) {
+						current_labelspec->flags |= LABEL_ACTIVE;
+						++found;
+					    }
+					}
+				    }
+				}
+			    }
+			    do_walk_label = found;
+			}
+		    }
+		  TOK_LBRACE optlabelinstancesoptlist TOK_RBRACE
+		;
+
+optinstancelabeldetails	: TOK_STRING optlabeldetails
+		    {
+			current_label_instance = -1;
+			current_label_instance_name = $1;
+		    }
+		| TOK_NUMBER optlabeldetails
+		    {
+			current_label_instance = atoi($1);
+			free($1);
+			current_label_instance_name = NULL;
+		    }
+		| TOK_LABEL_STAR optlabeldetails
+		    {
+			current_label_instance = -1;
+			current_label_instance_name = NULL;
+		    }
+		| /* nothing */
+		    {
+			current_label_instance = -1;
+			current_label_instance_name = NULL;
+			current_label_name = NULL;
+			current_label_value = NULL;
+		    }
+		;
+
+optlabelinstancesoptlist	: labelinstancesoptlist
+			| /* nothing */
+		    {
+			deactivate_labels();
+		    }
+			;
+
+labelinstancesoptlist	: labelinstancesopt
+			| labelinstancesopt labelinstancesoptlist
+			;
+
+labelinstancesopt	: TOK_DELETE
+		    {
+			labelspec_t	*lp;
+			for (lp = walk_label(W_START, LABEL_DELETE, "delete", 0); lp != NULL; lp = walk_label(W_NEXT, LABEL_DELETE, "delete", 0)) {
+			    lp->flags |= LABEL_DELETE;
+			}
+		    }
+		| TOK_INSTANCES TOK_ASSIGN indom_int
+		    {
+			labelspec_t	*lp;
+			for (lp = walk_label(W_START, LABEL_CHANGE_ID, "id", 0); lp != NULL; lp = walk_label(W_NEXT, LABEL_CHANGE_ID, "id", 0)) {
+			    pmInDom	indom;
+			    if (lp->new_id != lp->old_id) {
+				pmsprintf(mess, sizeof(mess), "Duplicate label clause for instances of indom %s", pmInDomStr(lp->old_id));
+				yyerror(mess);
+			    }
+			    if (current_star_indom)
+				indom = pmInDom_build(pmInDom_domain($3), pmInDom_serial(lp->old_id));
+			    else
+				indom = $3;
+			    if (indom != lp->old_id) {
+				lp->new_id = indom;
+				lp->flags |= LABEL_CHANGE_ID;
+			    }
+			    else {
+				/* no change ... */
+				if (wflag) {
+				    pmsprintf(mess, sizeof(mess), "Label for instance domain %s: indom: No change", pmInDomStr(lp->old_id));
+				    yywarn(mess);
+				}
+			    }
+			}
+		    }
+		| TOK_INSTANCE TOK_ASSIGN TOK_NUMBER
+		    {
+			labelspec_t	*lp;
+			for (lp = walk_label(W_START, LABEL_CHANGE_ID, "id", 0); lp != NULL; lp = walk_label(W_NEXT, LABEL_CHANGE_ID, "id", 0)) {
+			    int	instance;
+			    if (lp->new_instance != lp->old_instance) {
+				pmsprintf(mess, sizeof(mess), "Duplicate label clause for instances of indom %s", pmInDomStr(lp->old_id));
+				yyerror(mess);
+			    }
+			    instance = atoi($3);
+			    free($3);
+			    if (instance != lp->old_instance) {
+				lp->new_instance = instance;
+				lp->flags |= LABEL_CHANGE_INSTANCE;
+			    }
+			    else {
+				/* no change ... */
+				if (wflag) {
+				    pmsprintf(mess, sizeof(mess), "Label for instance domain %s instance %d: instance: No change", pmInDomStr(lp->old_id), lp->old_instance);
+				    yywarn(mess);
+				}
+				free($3);
+			    }
+			}
+		    }
+		| TOK_LABEL TOK_ASSIGN jsonname
+		    {
+			labelspec_t	*lp;
+			for (lp = walk_label(W_START, LABEL_CHANGE_LABEL, "label", 0); lp != NULL; lp = walk_label(W_NEXT, LABEL_CHANGE_LABEL, "label", 0)) {
+			    if (lp->new_label != NULL) {
+				pmsprintf(mess, sizeof(mess), "Duplicate label clause for instances of indom %s", pmInDomStr(lp->old_id));
+				yyerror(mess);
+			    }
+			    if (lp->old_label != NULL &&
+				strcmp(lp->old_label, $3) == 0) {
+				/* no change ... */
+				if (wflag) {
+				    pmsprintf(mess, sizeof(mess), "Label for instances of instance domain %s: label: No change", pmInDomStr(lp->old_id));
+				    yywarn(mess);
+				}
+				free($3);
+			    }
+			    else {
+				lp->new_label = $3;
+				lp->flags |= LABEL_CHANGE_LABEL;
+			    }
+			}
+		    }
+		;
+		| TOK_VALUE TOK_ASSIGN jsonvalue
+		    {
+			labelspec_t	*lp;
+			for (lp = walk_label(W_START, LABEL_CHANGE_VALUE, "value", 0); lp != NULL; lp = walk_label(W_NEXT, LABEL_CHANGE_VALUE, "value", 0)) {
+			    if (lp->new_value != NULL) {
+				pmsprintf(mess, sizeof(mess), "Duplicate value clause for instances of indom %s", pmInDomStr(lp->old_id));
+				yyerror(mess);
+			    }
+			    if (lp->old_value != NULL &&
+				strcmp(lp->old_value, $3) == 0) {
+				/* no change ... */
+				if (wflag) {
+				    pmsprintf(mess, sizeof(mess), "Label for instances of instance domain %s: value: No change", pmInDomStr(lp->old_id));
+				    yywarn(mess);
+				}
+				free($3);
+			    }
+			    else {
+				lp->new_value = $3;
+				lp->flags |= LABEL_CHANGE_VALUE;
+			    }
+			}
+		    }
+		;
+		| newlabelspec
+		    {
+			new_indom_instance_label(current_label_id);
 		    }
 		;
 

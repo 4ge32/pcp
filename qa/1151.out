@@ -9,7 +9,7 @@ Info: usdt_jvm_threads
 Info: Modules configured.
 Info: Initializing modules:
 Info: usdt_jvm_threads
-Info: usdt_jvm_threads: Found a Java process.
+Info: usdt_jvm_threads: Tracing PID.
 Info: usdt_jvm_threads: Initialized.
 Info: Modules initialized.
 Info: Registering metrics:
@@ -17,7 +17,6 @@ Info: usdt_jvm_threads
 Info: Metrics registered.
 Info: Registering helpers:
 Info: Helpers registered.
-Info: Ready to process requests.
 Info: Initializing, currently in 'notready' state.
 Info: Enabled modules:
 Info: ['usdt_jvm_threads']
@@ -26,7 +25,7 @@ Info: usdt_jvm_threads
 Info: Modules configured.
 Info: Initializing modules:
 Info: usdt_jvm_threads
-Info: usdt_jvm_threads: Found a Java process.
+Info: usdt_jvm_threads: Tracing PID.
 Info: usdt_jvm_threads: Initialized.
 Info: Modules initialized.
 Info: Registering metrics:
@@ -34,7 +33,6 @@ Info: usdt_jvm_threads
 Info: Metrics registered.
 Info: Registering helpers:
 Info: Helpers registered.
-Info: Ready to process requests.
 Updating the Performance Metrics Name Space (PMNS) ...
 Terminate PMDA if already installed ...
 [...install files, make output...]

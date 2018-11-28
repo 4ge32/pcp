@@ -261,6 +261,7 @@ _filter_optional_pmdas()
 	-e '/pmdanvidia/d' \
 	-e '/pmdaperfevent/d' \
 	-e '/pmdapipe/d' \
+	-e '/pmdapodman/d' \
 	-e '/pmdaprometheus/d' \
 	-e '/pmdaoracle/d' \
 	-e '/pmdaoraping/d' \
@@ -368,6 +369,7 @@ _filter_top_pmns()
 	-e '/^    pdns /d' \
 	-e '/^    perfevent /d' \
 	-e '/^    pipe /d' \
+	-e '/^    podman /d' \
 	-e '/^    postfix /d' \
 	-e '/^    postgresql /d' \
 	-e '/^    proc /d' \
@@ -497,7 +499,10 @@ s/\.\.\.\.*/.../
 	-e '/^[ 	]*$/d' \
 	-e '/is not a native service, redirecting to .*chkconfig/d' \
 	-e '/^Executing .*chkconfig pm.* --level=5/d' \
-	-e '/Failed to create avahi client: Daemon not running/s/\[.*] .* running//' \
+	-e '/\[.*] pmcd(.*) Error: Failed to create avahi client: Daemon not running/{
+s///
+/^$/d
+}' \
     | _filter_init_distro
 }
 

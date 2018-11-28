@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2013-2016 Red Hat.
+# Copyright (c) 2013-2018 Red Hat.
 # Copyright (c) 2000,2003,2004 Silicon Graphics, Inc.  All Rights Reserved.
 #
 # This program is free software; you can redistribute it and/or modify it
@@ -25,19 +25,22 @@ CPMDAS = root pmcd \
 	mmv lmsensors process roomtemp summary etw \
 	lustrecomm infiniband logger bash systemd \
 	gfs2 jbd2 cifs rpm nvidia papi perfevent \
-	dm pipe openbsd docker smart
+	dm pipe openbsd docker smart podman
 
 PLPMDAS = bonding netfilter zimbra postgresql \
 	dbping memcache mysql oracle vmware kvm \
 	named news pdns samba dtsrun postfix gpsd \
-	rsyslog elasticsearch snmp nginx nfsclient \
+	rsyslog snmp nginx nfsclient \
 	ds389 ds389log activemq lustre gpfs slurm \
 	bind2 redis nutcracker
 
-PYPMDAS = bcc gluster zswap unbound mic haproxy json libvirt lio prometheus
+PYPMDAS = bcc gluster zswap unbound mic haproxy json libvirt lio prometheus \
+	elasticsearch
 
 SUBDIRS = $(CPMDAS) $(PLPMDAS) $(PYPMDAS)
 LDIRT = pmcd.conf
+
+HAVE_UNIX_DOMAIN_SOCKETS = $(shell grep 'define HAVE_STRUCT_SOCKADDR_UN' $(TOPDIR)/src/include/pcp/config.h >/dev/null && echo yes)
 
 default :: default_pcp
 
@@ -51,7 +54,11 @@ default_pcp : $(SUBDIRS)
 	@echo '[access]' >> pmcd.conf
 	@echo 'disallow ".*" : store;' >> pmcd.conf
 	@echo 'disallow ":*" : store;' >> pmcd.conf
+ifeq "$(HAVE_UNIX_DOMAIN_SOCKETS)" "yes"
 	@echo 'allow "local:*" : all;' >> pmcd.conf
+else
+	@echo 'allow "localhost" : all;' >> pmcd.conf
+endif
 
 install :: install_pcp
 

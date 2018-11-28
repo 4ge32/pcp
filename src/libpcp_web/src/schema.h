@@ -1,15 +1,15 @@
 /*
  * Copyright (c) 2017-2018 Red Hat.
+ * 
+ * This library is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU Lesser General Public License as published
+ * by the Free Software Foundation; either version 2.1 of the License, or
+ * (at your option) any later version.
  *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2 of the License, or (at your
- * option) any later version.
- *
- * This program is distributed in the hope that it will be useful, but
+ * This library is distributed in the hope that it will be useful, but
  * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
- * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * for more details.
+ * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public
+ * License for more details.
  */
 #ifndef SERIES_SCHEMA_H
 #define SERIES_SCHEMA_H
@@ -18,11 +18,16 @@
 #include "redis.h"
 #include "private.h"
 #include "slots.h"
+#include "query.h"
 
-#define EVALSHA		"EVALSHA"
-#define EVALSHA_LEN	(sizeof(EVALSHA)-1)
+#define COMMAND		"COMMAND"
+#define COMMAND_LEN	(sizeof(COMMAND)-1)
 #define CLUSTER		"CLUSTER"
 #define CLUSTER_LEN	(sizeof(CLUSTER)-1)
+#define EVALSHA		"EVALSHA"
+#define EVALSHA_LEN	(sizeof(EVALSHA)-1)
+#define GEOADD		"GEOADD"
+#define GEOADD_LEN	(sizeof(GEOADD)-1)
 #define GETS		"GET"
 #define GETS_LEN	(sizeof(GETS)-1)
 #define HGET		"HGET"
@@ -37,6 +42,10 @@
 #define HMSET_LEN	(sizeof(HMSET)-1)
 #define HSCAN		"HSCAN"
 #define HSCAN_LEN	(sizeof(HSCAN)-1)
+#define HSET		"HSET"
+#define HSET_LEN	(sizeof(HSET)-1)
+#define HVALS		"HVALS"
+#define HVALS_LEN	(sizeof(HVALS)-1)
 #define PUBLISH		"PUBLISH"
 #define PUBLISH_LEN	(sizeof(PUBLISH)-1)
 #define SADD		"SADD"
@@ -49,7 +58,6 @@
 #define XADD_LEN	(sizeof(XADD)-1)
 #define XRANGE		"XRANGE"
 #define XRANGE_LEN	(sizeof(XRANGE)-1)
-
 
 /* create a Redis protocol command (e.g. XADD, SMEMBER) */
 static inline sds
@@ -89,18 +97,50 @@ redis_param_raw(sds cmd, sds param)
     return sdscatfmt(cmd, "%S\r\n", param);
 }
 
-typedef void (*redis_callback)(redisSlots *, redisReply *, void *);
-extern int redis_submitcb(redisSlots *, const char *, sds, sds,
-			redis_callback, void *);
-extern int redis_submit(redisSlots *, const char *, sds, sds);
+extern void redis_series_source(redisSlots *, void *);
+extern void redis_series_mark(redisSlots *, sds, int, void *);
+extern void redis_series_metric(redisSlots *, metric_t *, sds, int, int, void *);
 
-extern redisSlots *redis_init(sds);
-extern redisContext *redis_connect(char *, struct timeval *);
-extern void redis_stop(redisContext *);
+/*
+ * Asynchronous schema load baton structures
+ */
+#define LOAD_PHASES	5
 
-extern void redis_series_source(redisSlots *, context_t *);
-extern void redis_series_metric(redisSlots *, context_t *, metric_t *);
-extern void redis_series_mark(redisSlots *, context_t *, sds);
-extern void redis_series_stream(redisSlots *, sds, metric_t *);
+typedef struct seriesGetContext {
+    seriesBatonMagic	header;		/* MAGIC_CONTEXT */
+
+    context_t		context;
+    unsigned long long	count;		/* number of samples processed */
+    pmResult		*result;	/* currently active sample data */
+    int			error;		/* PMAPI error code from fetch */
+
+    redisDoneCallBack	done;
+
+    void		*baton;
+} seriesGetContext;
+
+typedef struct seriesLoadBaton {
+    seriesBatonMagic	header;		/* MAGIC_LOAD */
+
+    seriesBatonPhase	*current;
+    seriesBatonPhase	phases[LOAD_PHASES];
+
+    seriesGetContext	pmapi;		/* PMAPI context info */
+    redisSlots		*slots;		/* Redis server slots */
+    void		*module;
+    pmSeriesFlags	flags;
+    pmSeriesDoneCallBack done;
+    pmLogInfoCallBack	info;
+    void		*userdata;
+    timing_t		timing;
+
+    unsigned int	nmetrics;	/* number of metric names passed */
+    const char		**metrics;	/* metric specification strings */
+    dict		*errors;	/* PMIDs where errors observed */
+    dict		*wanted;	/* PMIDs from query whitelist */
+
+    int			error;
+    void		*arg;
+} seriesLoadBaton;
 
 #endif	/* SERIES_SCHEMA_H */

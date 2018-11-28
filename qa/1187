@@ -1,0 +1,89 @@
+#!/bin/sh
+# PCP QA Test No. 1187
+# Exercise pcp-dstat archive mode functionality.
+#
+# Copyright (c) 2018 Red Hat.  All Rights Reserved.
+#
+
+seq=`basename $0`
+echo "QA output created by $seq"
+
+# get standard environment, filters and checks
+. ./common.product
+. ./common.filter
+. ./common.check
+
+DSTAT="$PCP_BINADM_DIR/pcp-dstat"
+test -f "$DSTAT" || _notrun "$DSTAT is not installed, skipped"
+
+_cleanup()
+{
+    cd $here
+    $sudo rm -rf $tmp $tmp.*
+}
+
+status=1	# failure is the default!
+username=`id -u -n`
+$sudo rm -rf $tmp $tmp.* $seq.full
+trap "_cleanup; exit \$status" 0 1 2 3 15
+
+# read from the pcp-dstat archive with various dstat options
+#
+dstat()
+{
+    message="$1"
+    shift
+    options="$@"
+
+    echo "$message"
+
+    pcp_options="pcp -z --origin=+0.1 --archive $here/archives/pcp-dstat"
+    $pcp_options dstat --time $options 1 3 >$tmp.out 2>$tmp.err
+
+    echo "=== std out"
+    cat $tmp.out
+    echo "=== std err"
+    cat $tmp.err
+    echo "=== done" && echo
+}
+
+filter_info()
+{
+    sed \
+	-e "/^\t/d" \
+	-e "/^.GCC /d" \
+	-e "s/^Python .*/Python VERSION/g" \
+	-e "s,$PCP_SYSCONF_DIR,/etc/pcp,g" \
+	-e "s,pcp-dstat $PCP_VERSION,pcp-dstat VERSION,g" \
+	-e "s/\"User:\",\"$username\"/\"User:\",\"USER\"/g" \
+	-e "s/\"Date:\",\".*\"/\"Date:\",\"DATE\"/g" \
+	-e "s,-o $tmp.csv,-o TMP.csv,g" \
+    #end
+}
+
+# real QA test starts here
+export TERM=ansi
+dstat "Per CPU" --cpu -C 1,2,total --cpu-use
+dstat "CPU" --cpu-adv
+dstat "Per Disk" --disk -D sda,total --disk-wait
+dstat "All Disks" --disk --full
+dstat "Disk" --io
+dstat "Kernel" --ipc --sys --utmp
+dstat "Memory" --mem-adv --swap
+dstat "Per Interface" --net -N enp0s25,wlp3s0,tun0
+dstat "All Interfaces" --net --full
+dstat "Network" --socket --tcp
+dstat "Processes" --proc
+dstat "Filesystem" --aio --fs --lock
+
+dstat "Version" --version | filter_info
+dstat "Plugins" --list | filter_info
+
+dstat "CSV stdout" --io --tcp --aio -o $tmp.csv | filter_info
+echo "CSV contents" | tee -a $here/$seq.full
+cat $tmp.csv | tee -a $here/$seq.full | filter_info
+echo "CSV complete" | tee -a $here/$seq.full
+
+# success, all done
+status=0
+exit

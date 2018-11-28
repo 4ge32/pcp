@@ -94,7 +94,7 @@ func1(void *arg)
 
     pthread_barrier_wait(&barrier);
 
-    pthread_exit(NULL);
+    return(NULL);	/* pthread done */
 }
 
 static void *
@@ -155,7 +155,24 @@ func2(void *arg)
     else
 	printf("%s: __pmAccAddClient -> %s\n", fn, pmErrStr(sts));
 
-    pthread_exit(NULL);
+    return(NULL);	/* pthread done */
+}
+
+static void
+wait_for_thread(char *name, pthread_t tid)
+{
+    int		sts;
+    char	*msg;
+
+    sts = pthread_join(tid, (void *)&msg);
+    if (sts == 0) {
+	if (msg == PTHREAD_CANCELED)
+	    printf("thread %s: pthread_join: cancelled?\n", name);
+	else if (msg != NULL)
+	    printf("thread %s: pthread_join: %s\n", name, msg);
+    }
+    else
+	printf("thread %s: pthread_join: error: %s\n", name, strerror(sts));
 }
 
 int
@@ -164,7 +181,6 @@ main()
     pthread_t	tid1;
     pthread_t	tid2;
     int		sts;
-    char	*msg;
 
 #if PCP_VER >= 3702
     addr = __pmLoopBackAddress(AF_INET);
@@ -197,10 +213,8 @@ main()
 	exit(1);
     }
 
-    pthread_join(tid1, (void *)&msg);
-    if (msg != NULL) printf("tid1: %s\n", msg);
-    pthread_join(tid2, (void *)&msg); 
-    if (msg != NULL) printf("tid2: %s\n", msg);
+    wait_for_thread("tid1", tid1);
+    wait_for_thread("tid2", tid2);
 
 #if PCP_VER >= 3611
     __pmSockAddrFree(addr);

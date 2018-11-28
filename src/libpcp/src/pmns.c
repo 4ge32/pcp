@@ -131,7 +131,9 @@ __pmIsPmnsLock(void *lock)
 void
 init_pmns_lock(void)
 {
+#ifdef PM_MULTI_THREAD
     __pmInitMutex(&pmns_lock);
+#endif
 }
 
 /*
@@ -841,7 +843,7 @@ backname(__pmnsNode *np, char **name)
 
 	xl = (int)strlen(xp->name);
 	nch -= xl;
-	strncpy(&p[nch], xp->name, xl);
+	memcpy(&p[nch], xp->name, xl);
 	xp = xp->parent;
 	if (xp->parent == NULL)
 	    break;

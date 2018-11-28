@@ -1,6 +1,6 @@
 #! /bin/sh
 #
-# Copyright (c) 2013-2016 Red Hat.
+# Copyright (c) 2013-2016,2018 Red Hat.
 # Copyright (c) 1995-2000,2003 Silicon Graphics, Inc.  All Rights Reserved.
 # 
 # This program is free software; you can redistribute it and/or modify it
@@ -160,6 +160,13 @@ then
     exit
 fi
 
+_compress_now()
+{
+    # If $PCP_COMPRESSAFTER=0 in the control file(s), compress archives now.
+    # Invoked just before exit when this script has finished successfully.
+    $PCP_BINADM_DIR/pmlogger_daily -K $daily_args
+}
+
 # after argument checking, everything must be logged to ensure no mail is
 # accidentally sent from cron.  Close stdout and stderr, then open stdout
 # as our logfile and redirect stderr there too.
@@ -175,10 +182,13 @@ else
     _save_prev_file "$PROGLOG"
     # After argument checking, everything must be logged to ensure no mail is
     # accidentally sent from cron.  Close stdout and stderr, then open stdout
-    # as our logfile and redirect stderr there too.
+    # as our logfile and redirect stderr there too.  Create the log file with
+    # correct ownership first.
     #
-    # Exception is for -N where we want to see the output
+    # Exception ($SHOWME, above) is for -N where we want to see the output.
     #
+    touch "$PROGLOG"
+    chown $PCP_USER:$PCP_GROUP "$PROGLOG" >/dev/null 2>&1
     exec 1>"$PROGLOG" 2>&1
 fi
 
@@ -219,11 +229,19 @@ fi
 
 if [ $STOP_PMLOGGER = true ]
 then
-    # if pmlogger has never been started, there's no work to do to stop it
-    [ ! -d "$PCP_TMP_DIR/pmlogger" ] && exit
+    # if pmlogger hasn't been started, there's no work to do to stop it
+    # but we still want to compress existing logs, if any
+    if [ ! -d "$PCP_TMP_DIR/pmlogger" ]
+    then
+    	_compress_now
+	exit
+    fi
     $QUIETLY || $PCP_BINADM_DIR/pmpost "stop pmlogger from $prog"
 elif [ $START_PMLOGGER = false ]
 then
+    # if we're not going to start pmlogger, there is no work to do other
+    # than compress existing logs, if any.
+    _compress_now
     exit
 fi
 
@@ -360,18 +378,7 @@ _get_logfile()
 
 _get_primary_logger_pid()
 {
-    pidfile="$PCP_TMP_DIR/pmlogger/primary"
-    if [ ! -L "$pidfile" ]
-    then
-	pid=''
-    elif which realpath >/dev/null 2>&1
-    then
-	pri=`readlink $pidfile`
-	pid=`basename "$pri"`
-    else
-	pri=`ls -l "$pidfile" | sed -e 's/.*-> //'`
-	pid=`basename "$pri"`
-    fi
+    pid=`cat "$PCP_RUN_DIR/pmlogger.pid" 2>/dev/null`
     echo "$pid"
 }
 
@@ -720,6 +727,7 @@ s/^\([A-Za-z][A-Za-z0-9_]*\)=/export \1; \1=/p
 		    if $VERY_VERBOSE
 		    then
 			echo "primary pmlogger process pid not found"
+			ls -l "$PCP_RUN_DIR/pmlogger.pid"
 			ls -l "$PCP_TMP_DIR/pmlogger"
 		    fi
 		elif _get_pids_by_name pmlogger | grep "^$pid\$" >/dev/null
@@ -964,10 +972,8 @@ then
     fi
 fi
 
-# and if $PCP_COMPRESSAFTER=0 in the control file(s), compress archives now ...
-#
-$PCP_BINADM_DIR/pmlogger_daily -K $daily_args
-
+# Prior to exiting we compress existing logs, if any. See pmlogger_daily -K
+_compress_now
 
 [ -f $tmp/err ] && status=1
 exit

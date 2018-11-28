@@ -29,7 +29,6 @@ import sys
 
 # Our imports
 from datetime import datetime, timedelta
-import socket
 import time
 import math
 import re
@@ -246,8 +245,8 @@ class PMReporter(object):
             return 1
         return 0
 
-    def option(self, opt, optarg, index):
-        """ Perform setup for an individual command line option """
+    def option(self, opt, optarg, _index):
+        """ Perform setup for individual command line option """
         if opt == 'daemonize':
             self.daemonize = 1
         elif opt == 'K':
@@ -353,7 +352,7 @@ class PMReporter(object):
             raise pmapi.pmUsageErr()
 
     def connect(self):
-        """ Establish a PMAPI context """
+        """ Establish PMAPI context """
         context, self.source = pmapi.pmContext.set_connect_options(self.opts, self.source, self.speclocal)
 
         self.pmfg = pmapi.fetchgroup(context, self.source)
@@ -391,11 +390,11 @@ class PMReporter(object):
                 sys.stderr.write("Output directory %s not accessible.\n" % outdir)
                 sys.exit(1)
 
-        # Metric text label width can be ignored
+        # Set default width when needed
         if self.separate_header and not self.width:
             self.width = 8
 
-        # Adjustments and checks for for overall rankings
+        # Adjustments and checks for overall rankings
         if not self.rank and (self.overall_rank or self.overall_rank_alt):
             sys.stderr.write("Overall ranking requires ranking enabled.\n")
             sys.exit(1)
@@ -505,8 +504,8 @@ class PMReporter(object):
         self.report(None)
 
     def report(self, tstamp):
-        """ Report the metric values """
-        if tstamp != None:
+        """ Report metric values """
+        if tstamp is not None:
             tstamp = tstamp.strftime(self.timefmt)
 
         if self.overall_rank:
@@ -665,7 +664,7 @@ class PMReporter(object):
         def secs_to_readable(seconds):
             """ Convert seconds to easily readable format """
             seconds = float(math.floor((seconds) + math.copysign(0.5, seconds)))
-            parts = str(timedelta(seconds=int(round(seconds)))).split(':')
+            parts = str(timedelta(seconds=int(round(seconds)))).split(":")
             if len(parts[0]) == 1:
                 parts[0] = "0" + parts[0]
             elif parts[0][-2] == " ":
@@ -677,7 +676,7 @@ class PMReporter(object):
             if not self.interpol and self.opts.pmGetOptionSamples():
                 samples = str(samples) + " (requested)"
             elif not self.interpol:
-                samples = "N/A" # pylint: disable=redefined-variable-type
+                samples = "N/A"
 
         comm = "#" if self.output == OUTPUT_CSV else ""
         self.writer.write(comm + "\n")
@@ -703,7 +702,7 @@ class PMReporter(object):
         return zip(range(l), r)
 
     def get_instance_count(self, results):
-        """ Helper to get the number of instances of current results """
+        """ Helper to get number of instances of current results """
         if not self.dynamic_header:
             if self.colxrow is None:
                 c = len(str(sum([len(i[0]) for i in self.pmconfig.insts])))
@@ -725,10 +724,12 @@ class PMReporter(object):
             line += metric
             if self.pmconfig.insts[i][0][0] != PM_IN_NULL and name:
                 line += "[\"" + name + "\"]"
-            if self.metrics[metric][2][0]:
-                line += " - " + self.metrics[metric][2][0] + "\n"
-            else:
-                line += " - none\n"
+            if self.unitinfo:
+                if self.metrics[metric][2][0]:
+                    line += " - " + self.metrics[metric][2][0]
+                else:
+                    line += " - none"
+            line += "\n"
             self.writer.write(line.format(str(k)))
 
         k = 0
@@ -781,7 +782,6 @@ class PMReporter(object):
             if self.context.type != PM_CONTEXT_ARCHIVE:
                 self.writer.write(" (Ctrl-C to stop)")
             self.writer.write("\n")
-        return
 
     def write_header_csv(self, results=()):
         """ Write info header for CSV output """
@@ -856,7 +856,7 @@ class PMReporter(object):
             self.writer.write(self.format.format(*units) + "\n")
 
     def write_archive(self, timestamp):
-        """ Write an archive record """
+        """ Write archive record """
         if timestamp is None:
             # Complete and close
             self.pmi.pmiEnd()
@@ -896,9 +896,9 @@ class PMReporter(object):
                     def lookup_inst_index(mres, instance):
                         """ Helper to lookup instance index """
                         index = -1
-                        for inst, _, _ in mres:
+                        for ins, _, _ in mres:
                             index += 1
-                            if inst == instance:
+                            if ins == instance:
                                 return index
                         return -1
                     index = lookup_inst_index(self.prev_res[metric], inst)
@@ -922,7 +922,7 @@ class PMReporter(object):
         """ Update dynamic header as needed """
         if self.rank:
             for metric in results:
-                for i in results[metric]:
+                for _ in results[metric]:
                     results[metric] = sorted(results[metric], key=lambda x: x[0])
         insts = [i[0] for metric in results for i in results[metric]]
         if insts and (self.repeat_header == self.lines or insts != self.prev_insts):
@@ -1022,7 +1022,7 @@ class PMReporter(object):
         self.writer.write(line + "\n")
 
     def format_stdout_value(self, value, width, precision, fmt, k):
-        """ Format a value for stdout output """
+        """ Format value for stdout output """
         if isinstance(value, (int, long)):
             if len(str(value)) > width:
                 value = pmconfig.TRUNC
@@ -1037,7 +1037,7 @@ class PMReporter(object):
                 value = pmconfig.TRUNC
             elif s + 2 > width:
                 fmt[k] = "{X:" + str(width) + "d}"
-                value = int(value) # pylint: disable=redefined-variable-type
+                value = int(value)
             else:
                 c = precision
                 for _ in reversed(range(c+1)):
@@ -1057,14 +1057,14 @@ class PMReporter(object):
         return value
 
     def write_stdout(self, timestamp):
-        """ Write a line to stdout """
+        """ Write line to stdout """
         if self.colxrow is None:
             self.write_stdout_std(timestamp)
         else:
             self.write_stdout_colxrow(timestamp)
 
     def write_stdout_std(self, timestamp):
-        """ Write a line to standard formatted stdout """
+        """ Write line to standard formatted stdout """
         if timestamp is None:
             # Silent goodbye
             return
@@ -1116,7 +1116,7 @@ class PMReporter(object):
         self.writer.write(nfmt.format(*line) + "\n")
 
     def write_stdout_colxrow(self, timestamp):
-        """ Write a line to columns and rows swapped stdout """
+        """ Write line to columns and rows swapped stdout """
         if timestamp is None:
             # Silent goodbye
             return
@@ -1280,11 +1280,11 @@ class PMReporter(object):
                 continue
             rank = abs(self.rank) if self.pmconfig.descs[i].contents.indom != PM_IN_NULL else 1
             c, r, t = (0, [], [])
-            for i in sorted(results[metric] + self.all_ranked[metric], key=lambda value: value[2], reverse=revs):
-                if i[0] not in t and c < rank:
+            for j in sorted(results[metric] + self.all_ranked[metric], key=lambda value: value[2], reverse=revs):
+                if j[0] not in t and c < rank:
                     c += 1
-                    r.append(i)
-                    t.append(i[0])
+                    r.append(j)
+                    t.append(j[0])
             self.all_ranked[metric] = r
 
     def finalize(self):
@@ -1292,12 +1292,12 @@ class PMReporter(object):
         if self.writer:
             try:
                 self.writer.flush()
-            except socket.error as error:
+            except IOError as error:
                 if error.errno != errno.EPIPE:
                     raise error
             try:
                 self.writer.close()
-            except: # pylint: disable=bare-except
+            except Exception:
                 pass
             self.writer = None
         if self.pmi:
@@ -1311,9 +1311,8 @@ if __name__ == '__main__':
         P.validate_config()
         P.execute()
         P.finalize()
-
     except pmapi.pmErr as error:
-        sys.stderr.write('%s: %s\n' % (error.progname(), error.message()))
+        sys.stderr.write("%s: %s\n" % (error.progname(), error.message()))
         sys.exit(1)
     except pmapi.pmUsageErr as usage:
         usage.message()

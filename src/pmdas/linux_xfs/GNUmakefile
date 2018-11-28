@@ -30,7 +30,6 @@ HFILES		= sysfs_xfs.h filesys.h clusters.h indom.h
 SCRIPTS		= Install Remove
 VERSION_SCRIPT	= exports
 HELPTARGETS	= help.dir help.pag
-LSRCFILES 	= help root root_xfs linux_xfs_migrate.conf $(SCRIPTS)
 LDIRT		= $(HELPTARGETS) domain.h $(VERSION_SCRIPT)
 
 LLDLIBS		= $(PCP_PMDALIB)
@@ -83,3 +82,6 @@ filesys.o pmda.o:	filesys.h
 pmda.o: $(VERSION_SCRIPT)
 
 pmda.o:	$(TOPDIR)/src/include/pcp/libpcp.h
+
+check:: $(CFILES) $(HFILES)
+	$(CLINT) $^

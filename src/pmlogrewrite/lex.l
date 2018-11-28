@@ -33,6 +33,7 @@ char	mess[256];
 #define LEX_INDOM	2
 #define LEX_METRIC	3
 #define LEX_TEXT	4
+#define LEX_LABEL	5
 
 int mystate = LEX_NONE;
 
@@ -62,6 +63,27 @@ dupstr(char *s, int strip_quotes)
     return p;
 }
 
+/* Same as dupstr(), except allow escaped characters. */
+static char *
+duptextstr(char *s, int strip_quotes)
+{
+    const char	*p;
+    char	*q;
+
+    s = dupstr(s, strip_quotes);
+    q = s;
+    for (p = s; *p != '\0'; ++p) {
+        if (p[0] == '\\' && p[1] != '\0')
+            ++p;
+        if (p != q)
+            *q = *p;
+        ++q;
+    }
+    *q = '\0';
+
+    return s;
+}
+
 %}
 
 %option noinput
@@ -75,7 +97,7 @@ dupstr(char *s, int strip_quotes)
 #endif
 %}
 
-%s none glob host indom metric text type iftype sem units space time count output
+%s none glob host indom metric text label type iftype sem units space time count output
 %option case-insensitive
 
 %%
@@ -84,6 +106,7 @@ dupstr(char *s, int strip_quotes)
 <INITIAL>"metric"	{ mystate = LEX_METRIC; return TOK_METRIC; }
 <INITIAL>"indom"	{ mystate = LEX_INDOM; return TOK_INDOM; }
 <INITIAL>"text"		{ mystate = LEX_TEXT; BEGIN(text); return TOK_TEXT; }
+<INITIAL>"label"	{ mystate = LEX_LABEL; BEGIN(label); return TOK_LABEL; }
 
 <glob>"hostname"	{ BEGIN(host); return TOK_HOSTNAME; }
 <glob>"time"		{ return TOK_TIME; }
@@ -91,7 +114,7 @@ dupstr(char *s, int strip_quotes)
 	/* Hostname */
 <host>[A-Za-z0-9][A-Za-z0-9.-]*	{ yylval.str = dupstr(yytext, 0); BEGIN(glob); return TOK_HNAME; }
 
-<indom,metric,text>"delete"	{ return TOK_DELETE; }
+<indom,metric,text,label>"delete"	{ return TOK_DELETE; }
 <indom>"indom"		{ return TOK_INDOM; }
 <indom>"duplicate"	{ return TOK_DUPLICATE; }
 <indom>"iname"		{ return TOK_INAME; }
@@ -110,8 +133,23 @@ dupstr(char *s, int strip_quotes)
 <text>"indom"		{ return TOK_INDOM; }
 <text>"oneline"		{ return TOK_ONELINE; }
 <text>"help"		{ return TOK_HELP; }
-<text>"all"		{ return TOK_ALL; }
 <text>"text"		{ return TOK_TEXT; }
+<text>\*		{ return TOK_TEXT_STAR; }
+
+<label>"context"	{ return TOK_CONTEXT; }
+<label>"domain"		{ return TOK_DOMAIN; }
+<label>"cluster"	{ return TOK_CLUSTER; }
+<label>"item"		{ return TOK_ITEM; }
+<label>"indom"		{ return TOK_INDOM; }
+<label>"instances"	{ return TOK_INSTANCES; }
+<label>"instance"	{ return TOK_INSTANCE; }
+<label>"new"		{ return TOK_NEW; }
+<label>"label"		{ return TOK_LABEL; }
+<label>"value"		{ return TOK_VALUE; }
+<label>"true"		{ yylval.str = dupstr(yytext, 0); return TOK_JSON_TRUE; }
+<label>"false"		{ yylval.str = dupstr(yytext, 0); return TOK_JSON_FALSE; }
+<label>"null"		{ yylval.str = dupstr(yytext, 0); return TOK_JSON_NULL; }
+<label>\*		{ return TOK_LABEL_STAR; }
 
 <type>"32"		{ yylval.ival = PM_TYPE_32; BEGIN(metric); return TOK_TYPE_NAME; }
 <type>"U32"		{ yylval.ival = PM_TYPE_U32; BEGIN(metric); return TOK_TYPE_NAME; }
@@ -182,7 +220,7 @@ dupstr(char *s, int strip_quotes)
 <count>[0-9]+		{ yylval.ival = atoi(yytext); BEGIN(metric); return TOK_COUNT_NAME; }
 
 \"[^\"\n][^\"\n]*\"	{ yylval.str = dupstr(yytext, 1); return TOK_STRING; }
-\"[^\"][^\"]*\"		{ yylval.str = dupstr(yytext, 1); return TOK_NL_STRING; }
+\"(\\\"|[^\"])+\"	{ yylval.str = duptextstr(yytext, 1); return TOK_TEXT_STRING; }
 
 [0-9]+			{ yylval.str = dupstr(yytext, 0); return TOK_NUMBER; }
 
@@ -194,6 +232,10 @@ dupstr(char *s, int strip_quotes)
 
 [0-9]+\.[0-9]+\.\*	{ yylval.str = dupstr(yytext, 0); return TOK_PMID_STAR; }
 [0-9]+\.\*\.\*		{ yylval.str = dupstr(yytext, 0); return TOK_PMID_STAR; }
+
+(0|[1-9][0-9]*)(\.[0-9]+)?([eE][\+-]?[0-9]+)? { yylval.str = dupstr(yytext, 0); return TOK_JSON_NUMBER; }
+
+\"(\\[\"\\/bfnrt]|\\u[A-Fa-f0-9][A-Fa-f0-9][A-Fa-f0-9][A-Fa-f0-9]|[^\"\\\n])*\"	{ yylval.str = dupstr(yytext, 0); return TOK_JSON_STRING; }
 
 	/*
 	 * Generic name, e.g. for identifier or metric or hostname

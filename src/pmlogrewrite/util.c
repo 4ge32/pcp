@@ -1,7 +1,7 @@
 /*
  * Utiility routines for pmlogrewrite
  *
- * Copyright (c) 2013-2017 Red Hat.
+ * Copyright (c) 2013-2018 Red Hat.
  * Copyright (c) 2011 Ken McDonell.  All Rights Reserved.
  * Copyright (c) 1997-2000 Silicon Graphics, Inc.  All Rights Reserved.
  * 
@@ -89,9 +89,6 @@ inst_name_eq(const char *p, const char *q)
  * If _any_ error occurs, don't make any changes.
  *
  * Note: also handles compressed versions of files.
- *
- * TODO - need global locking for PCP 3.6 version if this is promoted
- *        to libpcp
  */
 int
 _pmLogRename(const char *old, const char *new)
@@ -200,15 +197,16 @@ cleanup:
 }
 
 /*
- * Remove all the physical archive files with basename of base.
+ * Remove the physical archive files with basename of base.
+ * If upto is -1, remove them all (this is the normal abandon()
+ * case).
+ * Otherwise, remove .index, .meta and volume 0, 1, ... upto
+ * and skip removal for any volumes upto+1, upto+2, ...
  *
  * Note: also handles compressed versions of files.
- *
- * TODO - need global locking for PCP 3.6 version if this is promoted
- *        to libpcp
  */
 int
-_pmLogRemove(const char *name)
+_pmLogRemove(const char *name, int upto)
 {
     int			sts;
     int			nfound = 0;
@@ -260,6 +258,29 @@ _pmLogRemove(const char *name)
 	if (strcmp(base, logbase) != 0)
 	    continue; /* Not the same archive */
 
+	if (upto != -1) {
+	    char	*q;
+	    char	*qend;
+	    int		vol;
+	    q = &dp->d_name[strlen(logbase)];
+	    if (*q != '.')
+		goto smackit;
+	    q++;
+	    if (*q == '\0')
+		goto smackit;
+	    if (strcmp(q, "index") == 0 || strcmp(q, "meta") == 0)
+		goto smackit;
+	    vol = (int)strtol(q, &qend, 10);
+	    if (*qend != '\0')
+		goto smackit;
+	    if (vol > upto) {
+		if (pmDebugOptions.log)
+		    fprintf(stderr, "__pmLogRemove: do not remove %s\n", path);
+		continue;
+	    }
+	}
+
+smackit:
 	p = &dp->d_name[strlen(base)];
 	pmsprintf(path, sizeof(path), "%s%s", name, p);
 	unlink(path);
@@ -280,4 +301,42 @@ _pmLogRemove(const char *name)
     free(base);
 
     return sts;
+}
+
+char *
+dupcat(const char* s1, const char* s2)
+{
+    size_t	len;
+    char	*s;
+
+    len = strlen(s1) + strlen(s2) + 1;
+    s = malloc(len);
+    if (s == NULL) {
+	fprintf(stderr, "dupcat malloc(%d) failed: %s\n",
+		(int)len, strerror(errno));
+	abandon();
+	/*NOTREACHED*/
+    }
+
+    pmsprintf(s, len, "%s%s", s1, s2);
+    return s;
+}
+ 
+char *
+add_quotes(const char *s)
+{
+    size_t	len;
+    char	*s1;
+
+    len = strlen(s) + 2 + 1;
+    s1 = malloc(len);
+    if (s1 == NULL) {
+	fprintf(stderr, "add_quotes malloc(%d) failed: %s\n",
+		(int)len, strerror(errno));
+	abandon();
+	/*NOTREACHED*/
+    }
+
+    pmsprintf(s1, len, "\"%s\"", s);
+    return s1;
 }
