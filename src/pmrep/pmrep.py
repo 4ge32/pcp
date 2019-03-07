@@ -1,6 +1,6 @@
 #!/usr/bin/env pmpython
 #
-# Copyright (C) 2015-2018 Marko Myllynen <myllynen@redhat.com>
+# Copyright (C) 2015-2019 Marko Myllynen <myllynen@redhat.com>
 #
 # This program is free software; you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by the
@@ -37,9 +37,8 @@ import os
 # PCP Python PMAPI
 from pcp import pmapi, pmi, pmconfig
 from cpmapi import PM_CONTEXT_ARCHIVE, PM_CONTEXT_LOCAL
-from cpmapi import PM_ERR_EOL, PM_IN_NULL, PM_DEBUG_APPL1
+from cpmapi import PM_IN_NULL, PM_DEBUG_APPL1, PM_TIME_SEC
 from cpmapi import PM_SEM_DISCRETE, PM_TYPE_FLOAT, PM_TYPE_DOUBLE, PM_TYPE_STRING
-from cpmapi import PM_TIME_SEC
 from cpmi import PMI_ERR_DUPINSTNAME
 
 if sys.version_info[0] >= 3:
@@ -78,12 +77,13 @@ class PMReporter(object):
                      'timestamp', 'unitinfo', 'colxrow', 'separate_header',
                      'delay', 'width', 'delimiter', 'extcsv', 'width_force',
                      'extheader', 'repeat_header', 'timefmt', 'interpol',
-                     'dynamic_header', 'overall_rank', 'overall_rank_alt',
+                     'dynamic_header', 'overall_rank', 'overall_rank_alt', 'sort_metric',
                      'count_scale', 'space_scale', 'time_scale', 'version',
                      'count_scale_force', 'space_scale_force', 'time_scale_force',
                      'type_prefer', 'precision_force', 'limit_filter', 'limit_filter_force',
-                     'live_filter', 'rank', 'invert_filter', 'predicate',
-                     'speclocal', 'instances', 'ignore_incompat', 'omit_flat')
+                     'live_filter', 'rank', 'invert_filter', 'predicate', 'names_change',
+                     'speclocal', 'instances', 'ignore_incompat', 'ignore_unknown',
+                     'omit_flat')
 
         # The order of preference for options (as present):
         # 1 - command line options
@@ -106,6 +106,8 @@ class PMReporter(object):
         self.type = 0
         self.type_prefer = self.type
         self.ignore_incompat = 0
+        self.ignore_unknown = 0
+        self.names_change = 0 # ignore
         self.instances = []
         self.live_filter = 0
         self.rank = 0
@@ -115,6 +117,7 @@ class PMReporter(object):
         self.limit_filter_force = 0
         self.invert_filter = 0
         self.predicate = None
+        self.sort_metric = None
         self.omit_flat = 0
         self.colxrow = None
         self.width = 0
@@ -170,7 +173,7 @@ class PMReporter(object):
         opts = pmapi.pmOptions()
         opts.pmSetOptionCallback(self.option)
         opts.pmSetOverrideCallback(self.option_override)
-        opts.pmSetShortOptions("a:h:LK:c:Co:F:e:D:V?HUGpA:S:T:O:s:t:Z:zdrRIi:jJ:238:9:nN:vX:W:w:P:0:l:kxE:1gf:uq:b:y:Q:B:Y:")
+        opts.pmSetShortOptions("a:h:LK:c:Co:F:e:D:V?HUGpA:S:T:O:s:t:Z:zdrRIi:jJ:234:58:9:nN:6:vX:W:w:P:0:l:kxE:1gf:uq:b:y:Q:B:Y:")
         opts.pmSetShortUsage("[option...] metricspec [...]")
 
         opts.pmSetLongOptionHeader("General options")
@@ -207,15 +210,18 @@ class PMReporter(object):
         opts.pmSetLongOption("raw", 0, "r", "", "output raw counter values (no rate conversion)")
         opts.pmSetLongOption("raw-prefer", 0, "R", "", "prefer output raw counter values (no rate conversion)")
         opts.pmSetLongOption("ignore-incompat", 0, "I", "", "ignore incompatible instances (default: abort)")
+        opts.pmSetLongOption("ignore-unknown", 0, "5", "", "ignore unknown metrics (default: abort)")
         opts.pmSetLongOption("instances", 1, "i", "STR", "instances to report (default: all current)")
         opts.pmSetLongOption("live-filter", 0, "j", "", "perform instance live filtering")
         opts.pmSetLongOption("rank", 1, "J", "COUNT", "limit results to COUNT highest/lowest valued instances")
         opts.pmSetLongOption("overall-rank", 0, "2", "", "report overall ranking from archive")
         opts.pmSetLongOption("overall-rank-alt", 0, "3", "", "report overall ranking from archive in pmrep format")
+        opts.pmSetLongOption("names-change", 1, "4", "ACTION", "update/ignore/abort on PMNS changes (default: ignore)")
         opts.pmSetLongOption("limit-filter", 1, "8", "LIMIT", "default limit for value filtering")
         opts.pmSetLongOption("limit-filter-force", 1, "9", "LIMIT", "forced limit for value filtering")
         opts.pmSetLongOption("invert-filter", 0, "n", "", "perform ranking before live filtering")
         opts.pmSetLongOption("predicate", 1, "N", "METRIC", "set predicate filter reference metric")
+        opts.pmSetLongOption("sort-metric", 1, "6", "METRIC", "set sort reference metric for colxrow output")
         opts.pmSetLongOption("omit-flat", 0, "v", "", "omit single-valued metrics")
         opts.pmSetLongOption("colxrow", 1, "X", "STR", "swap stdout columns and rows using STR as header label")
         opts.pmSetLongOption("width", 1, "w", "N", "default column width")
@@ -290,6 +296,8 @@ class PMReporter(object):
             self.type_prefer = 1
         elif opt == 'I':
             self.ignore_incompat = 1
+        elif opt == '5':
+            self.ignore_unknown = 1
         elif opt == 'i':
             self.instances = self.instances + self.pmconfig.parse_instances(optarg)
         elif opt == 'j':
@@ -300,6 +308,16 @@ class PMReporter(object):
             self.overall_rank = 1
         elif opt == '3':
             self.overall_rank_alt = 1
+        elif opt == '4':
+            if optarg == 'ignore':
+                self.names_change = 0
+            elif optarg == 'abort':
+                self.names_change = 1
+            elif optarg == 'update':
+                self.names_change = 2
+            else:
+                sys.stderr.write("Unknown names-change action '%s' specified.\n" % optarg)
+                sys.exit(1)
         elif opt == '8':
             self.limit_filter = optarg
         elif opt == '9':
@@ -308,6 +326,8 @@ class PMReporter(object):
             self.invert_filter = 1
         elif opt == 'N':
             self.predicate = optarg
+        elif opt == '6':
+            self.sort_metric = optarg
         elif opt == 'v':
             self.omit_flat = 1
         elif opt == 'X':
@@ -409,8 +429,24 @@ class PMReporter(object):
             self.colxrow = None
             self.predicate = None
 
+        if self.names_change == 2:
+            self.dynamic_header = 1
+
         self.pmconfig.validate_metrics(curr_insts=not self.live_filter)
         self.pmconfig.finalize_options()
+
+        if self.sort_metric:
+            for sort_metric in self.sort_metric.split(","):
+                sort_metric = sort_metric[1:] if sort_metric[:1] == "-" else sort_metric
+                if sort_metric not in self.metrics:
+                    sys.stderr.write("Sort reference metric %s not part of metrics.\n" % sort_metric)
+                    sys.exit(1)
+
+                i = list(self.metrics.keys()).index(sort_metric)
+
+                if self.pmconfig.insts[i][0][0] == pmapi.c_api.PM_IN_NULL:
+                    sys.stderr.write("Sort reference metric must have instances.\n")
+                    sys.exit(1)
 
     def execute(self):
         """ Fetch and report """
@@ -472,8 +508,14 @@ class PMReporter(object):
             time.sleep(align)
 
         # Main loop
+        refresh_metrics = 0
         while self.samples != 0:
-            # Repeat static header if needed
+            # Refresh metrics as needed
+            if refresh_metrics:
+                refresh_metrics = 0
+                self.pmconfig.update_metrics(curr_insts=not self.live_filter)
+
+            # Repeat header if needed
             if self.output == OUTPUT_STDOUT and not self.dynamic_header:
                 if self.lines > 0 and self.repeat_header == self.lines:
                     self.write_header(True)
@@ -481,17 +523,9 @@ class PMReporter(object):
                 self.lines += 1
 
             # Fetch values
-            try:
-                self.pmfg.fetch()
-            except pmapi.pmErr as error:
-                if error.args[0] == PM_ERR_EOL:
-                    break
-                raise error
-
-            # Watch for endtime in uninterpolated mode
-            if not self.interpol:
-                if float(self.pmfg_ts().strftime('%s')) > float(self.opts.pmGetOptionFinish()):
-                    break
+            refresh_metrics = self.pmconfig.fetch()
+            if refresh_metrics < 0:
+                break
 
             # Report and prepare for the next round
             self.report(self.pmfg_ts())
@@ -833,7 +867,8 @@ class PMReporter(object):
             labels.append(self.metrics[metric][0])
         for i, metric in enumerate(self.metrics):
             if self.colxrow is not None:
-                if self.metrics[metric][0] in labels:
+                if self.metrics[metric][0] in labels or \
+                   (self.dynamic_header and results and not results[metric]):
                     continue
                 add_header_items(metric, None)
                 continue
@@ -863,6 +898,16 @@ class PMReporter(object):
             self.pmi = None
             return
 
+        def record_metric_info(metric, i):
+            """ Helper to record metric info """
+            self.recorded[metric] = []
+            self.pmi.pmiAddMetric(metric,
+                                  self.pmconfig.pmids[i],
+                                  self.pmconfig.descs[i].contents.type,
+                                  self.pmconfig.descs[i].contents.indom,
+                                  self.pmconfig.descs[i].contents.sem,
+                                  self.pmconfig.descs[i].contents.units)
+
         if self.pmi is None:
             # Create a new archive
             self.pmi = pmi.pmiLogImport(self.outfile)
@@ -872,18 +917,17 @@ class PMReporter(object):
                 self.pmi.pmiSetHostname(self.context.pmGetArchiveLabel().hostname)
             self.pmi.pmiSetTimezone(self.context.get_current_tz(self.opts))
             for i, metric in enumerate(self.metrics):
-                self.recorded[metric] = []
-                self.pmi.pmiAddMetric(metric,
-                                      self.pmconfig.pmids[i],
-                                      self.pmconfig.descs[i].contents.type,
-                                      self.pmconfig.descs[i].contents.indom,
-                                      self.pmconfig.descs[i].contents.sem,
-                                      self.pmconfig.descs[i].contents.units)
+                record_metric_info(metric, i)
 
         # Add current values
         data = 0
-        results = self.pmconfig.get_sorted_results()
+        # NB. We use valid_only=False to make sure that for every metric
+        # requested their metadata will be recorded in the archive even
+        # if their values are not available for whatever reason.
+        results = self.pmconfig.get_ranked_results(valid_only=False)
         for i, metric in enumerate(results):
+            if metric not in self.recorded:
+                record_metric_info(metric, i)
             for inst, name, value in results[metric]:
                 if inst != PM_IN_NULL and inst not in self.recorded[metric]:
                     try:
@@ -922,8 +966,7 @@ class PMReporter(object):
         """ Update dynamic header as needed """
         if self.rank:
             for metric in results:
-                for _ in results[metric]:
-                    results[metric] = sorted(results[metric], key=lambda x: x[0])
+                results[metric] = sorted(results[metric], key=lambda x: x[0])
         insts = [i[0] for metric in results for i in results[metric]]
         if insts and (self.repeat_header == self.lines or insts != self.prev_insts):
             if self.output == OUTPUT_CSV:
@@ -988,7 +1031,7 @@ class PMReporter(object):
         if self.extcsv:
             line += self.csv_tz
 
-        results = self.pmconfig.get_sorted_results()
+        results = self.pmconfig.get_ranked_results()
 
         if self.dynamic_header:
             self.dynamic_header_update(results)
@@ -998,7 +1041,7 @@ class PMReporter(object):
             for inst, _, value in results[metric]:
                 res[metric + "+" + str(inst)] = value
 
-        # Add corresponding values for each column in the static header
+        # Add corresponding values for each header column
         for i, metric in enumerate(self.metrics):
             fmt = "." + str(self.metrics[metric][6]) + "f"
             for j, n in self.get_results_iter(i, metric, results):
@@ -1076,7 +1119,7 @@ class PMReporter(object):
             line.append(timestamp)
         line.append(self.delimiter)
 
-        results = self.pmconfig.get_sorted_results()
+        results = self.pmconfig.get_ranked_results()
 
         if self.dynamic_header:
             self.dynamic_header_update(results, line)
@@ -1089,7 +1132,7 @@ class PMReporter(object):
             for inst, _, value in results[metric]:
                 res[metric + "+" + str(inst)] = value
 
-        # Add corresponding values for each column in the static header
+        # Add corresponding values for each header column
         k = 0
         for i, metric in enumerate(self.metrics):
             for j, n in self.get_results_iter(i, metric, results):
@@ -1124,7 +1167,7 @@ class PMReporter(object):
         # Avoid per-line I/O
         output = ""
 
-        results = self.pmconfig.get_sorted_results()
+        results = self.pmconfig.get_ranked_results()
 
         res = {}
         for i, metric in enumerate(results):
@@ -1136,6 +1179,17 @@ class PMReporter(object):
 
         if self.dynamic_header:
             self.dynamic_header_update(results)
+
+        if self.sort_metric:
+            found_insts = self.found_insts
+            self.found_insts = []
+            for sort_metric in self.sort_metric.split(","):
+                revs = True if sort_metric[:1] != "-" else False
+                sort_metric = sort_metric if revs else sort_metric[1:]
+                for r in sorted(results[sort_metric], key=lambda x: x[2], reverse=revs):
+                    if r[1] not in self.found_insts:
+                        self.found_insts.append(r[1])
+            self.found_insts.extend([i for i in found_insts if i not in self.found_insts])
 
         # We need to construct each line independently
         for instance in self.found_insts:
@@ -1265,7 +1319,7 @@ class PMReporter(object):
                     self.writer.write(output.format(*alt_line) + "\n")
             return
 
-        results = self.pmconfig.get_sorted_results()
+        results = self.pmconfig.get_ranked_results()
 
         if self.prev_insts is None:
             for i, metric in enumerate(results):
@@ -1280,7 +1334,7 @@ class PMReporter(object):
                 continue
             rank = abs(self.rank) if self.pmconfig.descs[i].contents.indom != PM_IN_NULL else 1
             c, r, t = (0, [], [])
-            for j in sorted(results[metric] + self.all_ranked[metric], key=lambda value: value[2], reverse=revs):
+            for j in sorted(results[metric] + self.all_ranked[metric], key=lambda x: x[2], reverse=revs):
                 if j[0] not in t and c < rank:
                     c += 1
                     r.append(j)

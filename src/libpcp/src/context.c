@@ -264,7 +264,7 @@ pmGetContextHostName_r(int handle, char *buf, int buflen)
 	    PM_TPD(curr_ctxp) = ctxp;
 
 	    name = "pmcd.hostname";
-	    sts = pmLookupName_ctx(ctxp, 1, &name, &pmid);
+	    sts = pmLookupName_ctx(ctxp, PM_NOT_LOCKED, 1, &name, &pmid);
 	    if (sts >= 0)
 		sts = pmFetch_ctx(ctxp, 1, &pmid, &resp);
 	    if (pmDebugOptions.context)
@@ -1848,13 +1848,13 @@ __pmIsLogCtlLock(void *lock)
 	    }
 	    else {
 		char	*result_new;
-		reslen += strlen(number)+1;
+		reslen += 1 + strlen(number) + 1;
 		if ((result_new = (char *)realloc(result, reslen)) == NULL) {
 		    pmNoMem("__pmIsLogCtlLock: realloc", reslen, PM_FATAL_ERR);
 		    /* NOTREACHED */
 		}
 		result = result_new;
-		strncat(result, ",", 1);
+		strncat(result, ",", 2);
 		strncat(result, number, strlen(number)+1);
 	    }
 	}

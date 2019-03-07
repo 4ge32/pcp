@@ -78,9 +78,17 @@ PCP_WEB_1.5 {
 PCP_WEB_1.6 {
   global:
     pmDiscoverSetup;
+    pmDiscoverSetSlots;
+    pmDiscoverSetHostSpec;
+    pmDiscoverSetEventLoop;
+    pmDiscoverSetMetricRegistry;
     pmDiscoverClose;
 
     pmSeriesSetup;
+    pmSeriesSetSlots;
+    pmSeriesSetHostSpec;
+    pmSeriesSetEventLoop;
+    pmSeriesSetMetricRegistry;
     pmSeriesClose;
 
     pmSeriesDiscoverSource;
@@ -104,3 +112,9 @@ PCP_WEB_1.6 {
     dictRelease;
 
 } PCP_WEB_1.5;
+
+PCP_WEB_1.7 {
+  global:
+    ini_parse;
+    pmIniFileParse;
+} PCP_WEB_1.6;

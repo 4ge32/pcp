@@ -8,12 +8,23 @@ VAGRANTFILE_API_VERSION = "2"
 VM_MEM = "8192"
 VM_CPU = "4"
 
-# QA Flags for provisioning/qa.sh
-QA_FLAGS = ""
-#QA_FLAGS = "022"
-#QA_FLAGS = "-g pmda.linux"
+if ENV.has_key?("PCP_VAGRANT_MODE")
+  pcp_mode = ENV['PCP_VAGRANT_MODE']
+else
+  pcp_mode = "qa"
+end
 
+def qa_groups
+  if ENV.has_key?("PCP_QA_GROUPS")
+    return ENV['PCP_QA_GROUPS']
+  else
+    return  "-g sanity -g pmda.linux -x flakey"
+  end
+end
 
+# to be used for determining groups to test
+# based on the git diff
+#env['PCP_CHANGE_RANGE']
 
 ############################################################
 # Host Definititions
@@ -23,104 +34,114 @@ pcp_hosts = {
         :ubuntu1804 => {
                 :hostname => "ubuntu1804",
                 :ipaddress => "10.100.10.24",
-                :box => "generic/ubuntu1804",
-                :script => "ubuntu.sh"
+                :box => "performancecopilot/ubuntu1804",
+                :script => "ubuntu.sh",
+                :qa => "-g sanity -g pmda.linux -x flakey",
+                :distro_name => "bionic"
         },
         :ubuntu1604 => {
                 :hostname => "ubuntu1604",
                 :ipaddress => "10.100.10.23",
-                :box => "generic/ubuntu1604",
-                :script => "ubuntu.sh"
+                :box => "performancecopilot/ubuntu1604",
+                :script => "ubuntu.sh",
+                :qa => "-g sanity -g pmda.linux -x flakey",
+                :distro_name => "xenial"
         },
         :ubuntu1404 => {
                 :hostname => "ubuntu1404",
                 :ipaddress => "10.100.10.22",
                 :box => "generic/ubuntu1404",
-                :script => "ubuntu.sh"
-        },
-        :rhel7 => {
-                :hostname => "centos7",
-                :ipaddress => "10.100.10.21",
-                :box => "generic/centos7",
-                :script => "rhel.sh"
+                :script => "ubuntu.sh",
+                :qa => "-g sanity -g pmda.linux -x flakey",
+                :distro_name => "trusty"
         },
         :centos7 => {
                 :hostname => "centos7",
                 :ipaddress => "10.100.10.20",
-                :box => "generic/centos7",
-                :script => "centos.sh"
+                :box => "centos/7",
+                :script => "centos.sh",
+                :qa => "-g sanity -g pmda.linux -x flakey",
+                :distro_name => "el7"
         },
         :centos6 => {
                :hostname => "centos6",
                 :ipaddress => "10.100.10.19",
-                :box => "generic/centos6",
-                :script => "centos.sh"
+                :box => "centos/6",
+                :script => "centos.sh",
+                :qa => "-g sanity -g pmda.linux -x flakey",
+                :distro_name => "el6"
         },
         :fedora29 => {
                 :hostname => "fedora29",
                 :ipaddress => "10.100.10.18",
-                :box => "generic/fedora29",
-                :script => "fedora.sh"
+                :box => "fedora/29-cloud-base",
+                :script => "fedora.sh",
+                :qa => "-g sanity -g pmda.linux -x flakey",
+                :distro_name => "f29"
         },
         :fedora28 => {
                 :hostname => "fedora28",
                 :ipaddress => "10.100.10.17",
-                :box => "generic/fedora28",
-                :script => "fedora.sh"
+                :box => "fedora/28-cloud-base",
+                :script => "fedora.sh",
+                :qa => "-g sanity -g pmda.linux -x flakey",
+                :distro_name => "f28"
         },
-        :fedora27 => {
-                :hostname => "fedora27",
-                :ipaddress => "10.100.10.16",
-                :box => "generic/fedora27",
-                :script => "fedora.sh"
-        },
-        :fedora26 => {
-                :hostname => "fedora26",
-                :ipaddress => "10.100.10.15",
-                :box => "generic/fedora26",
-                :script => "fedora.sh"
-        },
-        :fedora25 => {
-                :hostname => "fedora25",
+        :debian9 => {
+                :hostname => "debian9",
                 :ipaddress => "10.100.10.14",
-                :box => "generic/fedora25",
-                :script => "fedora.sh"
+                :box => "performancecopilot/debian9",
+                :script => "debian.sh",
+                :qa => "-g sanity -g pmda.linux -x flakey",
+                :distro_name => "stretch"
         },
         :debian8 => {
                 :hostname => "debian8",
                 :ipaddress => "10.100.10.13",
-                :box => "generic/debian8",
-                :script => "debian.sh"
+                :box => "performancecopilot/debian8",
+                :script => "debian.sh",
+                :qa => "-g sanity -g pmda.linux -x flakey",
+                :distro_name => "jessie"
         },
         :debian7 => {
                 :hostname => "debian7",
                 :ipaddress => "10.100.10.12",
                 :box => "generic/debian7",
-                :script => "debian.sh"
+                :script => "debian.sh",
+                :qa => "-g sanity -g pmda.linux -x flakey",
+                :distro_name => "wheezy"
         },
         :freebsd12 => {
                 :hostname => "freebsd12",
                 :ipaddress => "10.100.10.11",
                 :box => "generic/openbsd12",
-                :script => "openbsd.sh"
+                :script => "openbsd.sh",
+                :qa => "-g sanity -x flakey",
+                :distro_name => "freebsd12"
         },
         :freebsd11 => {
                 :hostname => "freebsd11",
                 :ipaddress => "10.100.10.10",
                 :box => "generic/freebsd11",
-                :script => "openbsd.sh"
+                :script => "openbsd.sh",
+                :qa => "-g sanity -x flakey",
+                :distro_name => "freebsd11"
         },
         :openbsd6 => {
                 :hostname => "openbsd6",
                 :ipaddress => "10.100.10.9",
-                :box => "generic/openbsd6",
-                :script => "openbsd.sh"
+                :box => "performancecopilot/openbsd6",
+                :script => "openbsd.sh",
+                :qa => "-g sanity -x flakey",
+                :distro_name => "openbsd6"
         },
         :opensuse42 => {
                 :hostname => "opensuse42",
                 :ipaddress => "10.100.10.8",
-                :box => "generic/opensuse42",
-                :script => "opensuse.sh"
+                :box => "performancecopilot/opensuse42",
+                :script => "opensuse.sh",
+                :qa => "-g sanity -g pmda.linux -x flakey",
+                :distro_name => "opensuse42"
         }
 }
 
@@ -189,8 +210,7 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |global_config|
   end
 
   # Global shared folder for pcp source.  Copy it so we have our own to muck around in
-  global_config.vm.synced_folder ".", "/vagrant", type: "rsync", rsync_auto: false, :rsync__exclude => ["qaresults/", "./pcp-\d.\d.\d" ]
-
+  global_config.vm.synced_folder ".", "/vagrant", type: "rsync", rsync_auto: false, :rsync__exclude => ["qaresults/", "./pcp-*/" ], :rsync__args => ["--verbose", "--archive", "--delete", "-z", "--no-owner", "--no-group" ]
 
   pcp_hosts.each_pair do |name, options|
     global_config.vm.define name do |config|
@@ -206,7 +226,7 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |global_config|
        # config.vm.synced_folder "./qaresults/#{name}", "/qaresults", mount_options: ["dmode=777", "fmode=666"], create: true
 
        # TODO - this appears to fail with `vagrant provision osxsierra`
-       config.vm.synced_folder "./qaresults/#{name}", "/qaresults", create: true, nfs_version: 4, nfs_udp: false
+       config.vm.synced_folder "./qaresults/#{name}", "/qaresults", create: true, type: "rsync"
 
        config.vm.hostname = "#{options[:hostname]}"
        config.vm.network :private_network, ip: options[:ipaddress]
@@ -218,7 +238,12 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |global_config|
        config.vm.provision :shell, path: "provisioning/#{options[:script]}"
 
        # Run QA and copy results back to host
-       config.vm.provision :shell, :path => "provisioning/qa.sh"
+       config.vm.provision :shell, path: "provisioning/qa.sh", args: [ qa_groups ]
+       if pcp_mode == "release"
+         config.vm.provision :shell, path: "provisioning/release.sh", args: [ "#{ options[:distro_name] }" ]
+       elsif pcp_mode == "nightly"
+         config.vm.provision :shell, path: "provisioning/release.sh", args: [ "#{ options[:distro_name] }".concat("-testing") ]
+       end
     end
   end
 end

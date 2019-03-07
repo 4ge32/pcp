@@ -59,6 +59,25 @@ else
     skip_pmchart=true
 fi
 
+# these may not be installed on all platforms
+skip_pmdumptext=false
+which pmchart > /dev/null 2>&1
+if [ $? -ne 0 ]
+then
+    skip_pmchart=true
+fi
+which pmdumptext > /dev/null 2>&1
+if [ $? -ne 0 ]
+then
+    skip_pmdumptext=true
+fi
+skip_pmseries=false
+which pmseries > /dev/null 2>&1
+if [ $? -ne 0 ]
+then
+    skip_pmseries=true
+fi
+
 # sources
 share_dir=`dirname $PCP_SHARE_DIR`
 bash_comp=${share_dir}/bash-completion/completions/pcp
@@ -67,7 +86,7 @@ zsh_comp=${share_dir}/zsh/site-functions/_pcp
 # functions
 _check_completion_bash()
 {
-  cmds="$(grep '  pcp2.*)' $bash_comp | tr -d ')'))"
+  cmds="$(grep '  pcp2.*)' $bash_comp | tr -d ')')"
   cmds="$cmds $(grep '  pm.*)' $bash_comp | tr -d ')')"
   for cmd in $cmds; do
     $skip_pcp2elasticsearch && [ "$cmd" = pcp2elasticsearch ] && continue
@@ -79,7 +98,9 @@ _check_completion_bash()
     $skip_pcp2xml && [ "$cmd" = pcp2xml ] && continue
     $skip_pcp2zabbix && [ "$cmd" = pcp2zabbix ] && continue
     $skip_pmchart && [ "$cmd" = pmchart ] && continue
+    $skip_pmdumptext && [ "$cmd" = pmdumptext ] && continue
     $skip_pmrep && [ "$cmd" = pmrep ] && continue
+    $skip_pmseries && [ "$cmd" = pmseries ] && continue
     comps=$(grep -A 1 "  $cmd)" $bash_comp | tail -n 1 | sed -e 's,all_args=",,' -e 's,",,')
     # Need $tmp.err and PCP_STDERR for pmchart ...
     #
@@ -124,7 +145,9 @@ _check_completion_zsh()
     $skip_pcp2xml && [ "$cmd" = pcp2xml ] && continue
     $skip_pcp2zabbix && [ "$cmd" = pcp2zabbix ] && continue
     $skip_pmchart && [ "$cmd" = pmchart ] && continue
+    $skip_pmdumptext && [ "$cmd" = pmdumptext ] && continue
     $skip_pmrep && [ "$cmd" = pmrep ] && continue
+    $skip_pmseries && [ "$cmd" = pmseries ] && continue
     echo $cmd | grep = > /dev/null 2>&1 && continue
     common=$(awk "/common_most=/,/  \)/" $zsh_comp)
     pytool=$(awk "/common_python=/,/  \)/" $zsh_comp)

@@ -135,13 +135,13 @@ typedef struct {
 #define REGEX_INST_COMPACT	100
 
 extern int __dmtraverse(__pmContext *, const char *, char ***) _PCP_HIDDEN;
-extern int __dmchildren(__pmContext *, const char *, char ***, int **) _PCP_HIDDEN;
-extern int __dmgetpmid(const char *, pmID *) _PCP_HIDDEN;
+extern int __dmchildren(__pmContext *, int, const char *, char ***, int **) _PCP_HIDDEN;
+extern int __dmgetpmid(int, const char *, pmID *) _PCP_HIDDEN;
 extern int __dmgetname(pmID, char **) _PCP_HIDDEN;
 extern void __dmopencontext(__pmContext *) _PCP_HIDDEN;
-extern void __dmbind(__pmContext *, int) _PCP_HIDDEN;
+extern void __dmbind(int, __pmContext *, int) _PCP_HIDDEN;
 extern void __dmclosecontext(__pmContext *) _PCP_HIDDEN;
-extern int __dmdesc(__pmContext *, pmID, pmDesc *) _PCP_HIDDEN;
+extern int __dmdesc(__pmContext *, int, pmID, pmDesc *) _PCP_HIDDEN;
 extern int __dmprefetch(__pmContext *, int, const pmID *, pmID **) _PCP_HIDDEN;
 extern void __dmpostfetch(__pmContext *, pmResult **) _PCP_HIDDEN;
 extern void __dmdumpexpr(node_t *, int) _PCP_HIDDEN;

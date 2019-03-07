@@ -1,8 +1,8 @@
 Name:    pcp
-Version: 4.3.0
+Version: 4.3.1
 Release: 1%{?dist}
 Summary: System-level performance monitoring and performance management
-License: GPLv2+ and LGPLv2.1+ and CC-BY
+License: GPLv2+ and LGPLv2+ and CC-BY
 URL:     https://pcp.io
 Group:   Applications/System
 
@@ -29,16 +29,10 @@ Source4: %{github}/pcp-webapp-blinkenlights/archive/1.0.1/pcp-webapp-blinkenligh
 
 %global disable_snmp 0
 
-# There are no papi/libpfm devel packages for s390, armv7hl nor for some rhels, disable
+# No libpfm devel packages for s390, armv7hl nor for some rhels, disable
 %ifarch s390 s390x armv7hl
-%global disable_papi 1
 %global disable_perfevent 1
 %else
-%if 0%{?rhel} == 0 || 0%{?rhel} > 5
-%global disable_papi 0
-%else
-%global disable_papi 1
-%endif
 %if 0%{?fedora} >= 20 || 0%{?rhel} > 6
 %global disable_perfevent 0
 %else
@@ -47,7 +41,7 @@ Source4: %{github}/pcp-webapp-blinkenlights/archive/1.0.1/pcp-webapp-blinkenligh
 %endif
 
 # libvarlink and pmdapodman
-%if 0%{?fedora} >= 28 || 0%{?rhel} >= 7
+%if 0%{?fedora} >= 28 || 0%{?rhel} > 7
 %global disable_podman 0
 %else
 %global disable_podman 1
@@ -86,15 +80,11 @@ Source4: %{github}/pcp-webapp-blinkenlights/archive/1.0.1/pcp-webapp-blinkenligh
 %endif
 
 # support for pmdabcc
-%if 0%{?fedora} >= 25 || 0%{?rhel} > 7
+%if 0%{?fedora} >= 25 || 0%{?rhel} > 6
 %ifarch s390 s390x armv7hl aarch64 i686
 %global disable_bcc 1
 %else
-%if !%{disable_python3}
 %global disable_bcc 0
-%else
-%global disable_bcc 1
-%endif
 %endif
 %else
 %global disable_bcc 1
@@ -160,6 +150,13 @@ Source4: %{github}/pcp-webapp-blinkenlights/archive/1.0.1/pcp-webapp-blinkenligh
 %global disable_boost 1
 %endif
 
+# libuv
+%if 0%{?fedora} >= 28 || 0%{?rhel} > 7
+%global disable_libuv 0
+%else
+%global disable_libuv 1
+%endif
+
 # rpm producing "noarch" packages
 %if 0%{?rhel} == 0 || 0%{?rhel} > 5
 %global disable_noarch 0
@@ -201,9 +198,6 @@ BuildRequires: python3-devel
 BuildRequires: ncurses-devel
 BuildRequires: readline-devel
 BuildRequires: cyrus-sasl-devel
-%if !%{disable_papi}
-BuildRequires: papi-devel
-%endif
 %if !%{disable_podman}
 BuildRequires: libvarlink-devel
 %endif
@@ -221,6 +215,9 @@ BuildRequires: systemtap-sdt-devel
 %endif
 %if !%{disable_boost}
 BuildRequires: boost-devel
+%endif
+%if !%{disable_libuv}
+BuildRequires: libuv-devel >= 1.16
 %endif
 %if 0%{?rhel} == 0 || 0%{?rhel} > 7
 BuildRequires: perl-generators
@@ -309,10 +306,6 @@ Requires: pcp-libs = %{version}-%{release}
 %global _with_ib --with-infiniband=yes
 %endif
 
-%if !%{disable_papi}
-%global _with_papi --with-papi=yes
-%endif
-
 %if %{disable_perfevent}
 %global _with_perfevent --with-perfevent=no
 %else
@@ -365,14 +358,6 @@ then
 fi
 }
 
-# force upgrade of PMDAs starting in "notready" state
-%global pmda_notready() %{expand:
-if grep -q ^%2 "%{_confdir}/pmcd/pmcd.conf" 2>/dev/null
-then
-    touch %{_pmdasdir}/%2/.NeedInstall
-fi
-}
-
 %global selinux_handle_policy() %{expand:
 if [ %1 -ge 1 ]
 then
@@ -395,7 +380,7 @@ applications to easily retrieve and process any subset of that data.
 # pcp-conf
 #
 %package conf
-License: LGPLv2.1+
+License: LGPLv2+
 Group: System Environment/Libraries
 Summary: Performance Co-Pilot run-time configuration
 URL: https://pcp.io
@@ -410,7 +395,7 @@ Performance Co-Pilot (PCP) run-time configuration
 # pcp-libs
 #
 %package libs
-License: LGPLv2.1+
+License: LGPLv2+
 Group: System Environment/Libraries
 Summary: Performance Co-Pilot run-time libraries
 URL: https://pcp.io
@@ -423,7 +408,7 @@ Performance Co-Pilot (PCP) run-time libraries
 # pcp-libs-devel
 #
 %package libs-devel
-License: GPLv2+ and LGPLv2.1+
+License: GPLv2+ and LGPLv2+
 Group: Development/Libraries
 Summary: Performance Co-Pilot (PCP) development headers
 URL: https://pcp.io
@@ -436,7 +421,7 @@ Performance Co-Pilot (PCP) headers for development.
 # pcp-devel
 #
 %package devel
-License: GPLv2+ and LGPLv2.1+
+License: GPLv2+ and LGPLv2+
 Group: Development/Libraries
 Summary: Performance Co-Pilot (PCP) development tools and documentation
 URL: https://pcp.io
@@ -505,6 +490,7 @@ Requires: pcp-system-tools
 Requires: pcp-gui
 %endif
 Requires: bc gcc gzip bzip2
+Requires: redhat-rpm-config
 
 %description testsuite
 Quality assurance test suite for Performance Co-Pilot (PCP).
@@ -955,23 +941,6 @@ Performance Co-Pilot (PCP) front-end tools for exporting metric values
 to the Zabbix (https://www.zabbix.org/) monitoring software.
 %endif
 
-%if !%{disable_papi}
-#
-# pcp-pmda-papi
-#
-%package pmda-papi
-License: GPLv2+
-Group: Applications/System
-Summary: Performance Co-Pilot (PCP) metrics for Performance API and hardware counters
-URL: https://pcp.io
-Requires: pcp = %{version}-%{release} pcp-libs = %{version}-%{release}
-BuildRequires: papi-devel
-
-%description pmda-papi
-This package contains the PCP Performance Metrics Domain Agent (PMDA) for
-collecting hardware counters statistics through PAPI (Performance API).
-%endif
-
 %if !%{disable_podman}
 #
 # pcp-pmda-podman
@@ -1002,6 +971,7 @@ URL: https://pcp.io
 Requires: pcp = %{version}-%{release} pcp-libs = %{version}-%{release}
 Requires: libpfm >= 4
 BuildRequires: libpfm-devel >= 4
+Obsoletes: pcp-pmda-papi
 
 %description pmda-perfevent
 This package contains the PCP Performance Metrics Domain Agent (PMDA) for
@@ -2010,7 +1980,7 @@ Requires: pcp = %{version}-%{release}
 Requires: pcp-libs = %{version}-%{release}
 %description pmda-summary
 This package contains the PCP Performance Metrics Domain Agent (PMDA) for
-collecting metrics about other installed pmdas.
+collecting metrics about other installed PMDAs.
 # end pcp-pmda-summary
 
 %if !%{disable_systemd}
@@ -2138,7 +2108,7 @@ Requires: pcp-libs = %{version}-%{release}
 # https://fedoraproject.org/wiki/Packaging:Guidelines "Renaming/Replacing Existing Packages"
 Provides: dstat = %{version}-%{release}
 Provides: /usr/bin/dstat
-Obsoletes: dstat <= 0.7.3-5
+Obsoletes: dstat <= 0.8
 %endif
 
 %description system-tools
@@ -2228,7 +2198,7 @@ updated policy package.
 %if !%{disable_python2} && 0%{?default_python} != 3
 export PYTHON=python%{?default_python}
 %endif
-%configure %{?_with_initd} %{?_with_doc} %{?_with_dstat} %{?_with_ib} %{?_with_papi} %{?_with_podman} %{?_with_perfevent} %{?_with_bcc} %{?_with_json} %{?_with_snmp} %{?_with_nutcracker} %{?_with_webapps} %{?_with_python2}
+%configure %{?_with_initd} %{?_with_doc} %{?_with_dstat} %{?_with_ib} %{?_with_podman} %{?_with_perfevent} %{?_with_bcc} %{?_with_json} %{?_with_snmp} %{?_with_nutcracker} %{?_with_webapps} %{?_with_python2}
 make %{?_smp_mflags} default_pcp
 
 %install
@@ -2328,7 +2298,6 @@ ls -1 $RPM_BUILD_ROOT/%{_pmdasdir} |\
   grep -E -v '^nginx' |\
   grep -E -v '^nutcracker' |\
   grep -E -v '^oracle' |\
-  grep -E -v '^papi' |\
   grep -E -v '^pdns' |\
   grep -E -v '^podman' |\
   grep -E -v '^postfix' |\
@@ -2550,11 +2519,6 @@ fi
 %{pmda_remove "$1" "rpm"}
 %endif #preun pmda-rpm
 
-%if !%{disable_papi}
-%preun pmda-papi
-%{pmda_remove "$1" "papi"}
-%endif #preun pmda-papi
-
 %if !%{disable_systemd}
 %preun pmda-systemd
 %{pmda_remove "$1" "systemd"}
@@ -2760,6 +2724,17 @@ fi
 %preun pmda-weblog
 %{pmda_remove "$1" "weblog"}
 
+%if !%{disable_systemd}
+%preun zeroconf
+if [ "$1" -eq 0 ]
+then
+    %systemd_preun pmlogger_daily_report.timer
+    %systemd_preun pmlogger_daily_report.service
+    %systemd_preun pmlogger_daily_report-poll.timer
+    %systemd_preun pmlogger_daily_report-poll.service
+fi
+%endif
+
 %preun
 if [ "$1" -eq 0 ]
 then
@@ -2813,9 +2788,13 @@ chown -R pcp:pcp %{_logsdir}/pmmgr 2>/dev/null
 %post zeroconf
 PCP_PMDAS_DIR=%{_pmdasdir}
 PCP_SYSCONFIG_DIR=%{_sysconfdir}/sysconfig
-# auto-install important PMDAs for RH Support
+PCP_PMCDCONF_PATH=%{_confdir}/pmcd/pmcd.conf
+# auto-install important PMDAs for RH Support (if not present already)
 for PMDA in dm nfsclient ; do
-    touch "$PCP_PMDAS_DIR/$PMDA/.NeedInstall"
+    if ! grep -q "$PMDA/pmda$PMDA" "$PCP_PMCDCONF_PATH"
+    then
+	touch "$PCP_PMDAS_DIR/$PMDA/.NeedInstall"
+    fi
 done
 # increase default pmlogger recording frequency
 sed -i 's/^\#\ PMLOGGER_INTERVAL.*/PMLOGGER_INTERVAL=10/g' "$PCP_SYSCONFIG_DIR/pmlogger"
@@ -2828,6 +2807,8 @@ pmieconf -c enable dmthin
     systemctl restart pmie >/dev/null 2>&1
     systemctl enable pmcd >/dev/null 2>&1
     systemctl enable pmlogger >/dev/null 2>&1
+    systemctl enable pmlogger_daily_report >/dev/null 2>&1
+    systemctl enable pmlogger_daily_report-poll >/dev/null 2>&1
     systemctl enable pmie >/dev/null 2>&1
 %else
     /sbin/chkconfig --add pmcd >/dev/null 2>&1
@@ -2849,14 +2830,6 @@ pmieconf -c enable dmthin
 %triggerin selinux -- container-selinux
 %{selinux_handle_policy "$1" "pcpupstream-container"}
 %endif
-
-%if !%{disable_bcc}
-%post pmda-bcc
-%{pmda_notready "$1" "bcc"}
-%endif
-
-%post pmda-prometheus
-%{pmda_notready "$1" "prometheus"}
 
 %post
 PCP_LOG_DIR=%{_logsdir}
@@ -2952,10 +2925,23 @@ cd
 %{_unitdir}/pmlogger.service
 %{_unitdir}/pmie.service
 %{_unitdir}/pmproxy.service
-%endif
-%config(noreplace) %{_sysconfdir}/sasl2/pmcd.conf
+# services and timers replacing the old cron scripts
+%{_unitdir}/pmlogger_check.service
+%{_unitdir}/pmlogger_check.timer
+%{_unitdir}/pmlogger_daily.service
+%{_unitdir}/pmlogger_daily.timer
+%{_unitdir}/pmlogger_daily-poll.service
+%{_unitdir}/pmlogger_daily-poll.timer
+%{_unitdir}/pmie_check.service
+%{_unitdir}/pmie_check.timer
+%{_unitdir}/pmie_daily.service
+%{_unitdir}/pmie_daily.timer
+%else
+# cron scripts
 %config(noreplace) %{_sysconfdir}/cron.d/pcp-pmlogger
 %config(noreplace) %{_sysconfdir}/cron.d/pcp-pmie
+%endif
+%config(noreplace) %{_sysconfdir}/sasl2/pmcd.conf
 %config(noreplace) %{_sysconfdir}/sysconfig/pmlogger
 %config(noreplace) %{_sysconfdir}/sysconfig/pmproxy
 %config(noreplace) %{_sysconfdir}/sysconfig/pmcd
@@ -2978,6 +2964,8 @@ cd
 %dir %attr(0775,pcp,pcp) %{_confdir}/nssdb
 %dir %{_confdir}/discover
 %config(noreplace) %{_confdir}/discover/pcp-kube-pods.conf
+%dir %{_confdir}/pmseries
+%config(noreplace) %{_confdir}/pmseries/pmseries.conf
 
 %ghost %dir %attr(0775,pcp,pcp) %{_localstatedir}/run/pcp
 %{_localstatedir}/lib/pcp/config/pmafm
@@ -2998,7 +2986,15 @@ cd
 
 %files zeroconf
 %{_libexecdir}/pcp/bin/pmlogger_daily_report
+%if !%{disable_systemd}
+# systemd services for pmlogger_daily_report to replace the cron script
+%{_unitdir}/pmlogger_daily_report.service
+%{_unitdir}/pmlogger_daily_report.timer
+%{_unitdir}/pmlogger_daily_report-poll.service
+%{_unitdir}/pmlogger_daily_report-poll.timer
+%else
 %config(noreplace) %{_sysconfdir}/cron.d/pcp-pmlogger-daily-report
+%endif
 %{_localstatedir}/lib/pcp/config/pmlogconf/zeroconf
 
 #additional pmlogger config files
@@ -3117,11 +3113,6 @@ cd
 %files import-collectl2pcp
 %{_bindir}/collectl2pcp
 
-%if !%{disable_papi}
-%files pmda-papi
-%{_pmdasdir}/papi
-%endif
-
 %if !%{disable_podman}
 %files pmda-podman
 %{_pmdasdir}/podman
@@ -3218,6 +3209,7 @@ cd
 
 %files pmda-postgresql
 %{_pmdasdir}/postgresql
+%config(noreplace) %{_pmdasdir}/postgresql/pmdapostgresql.conf
 
 %files pmda-redis
 %{_pmdasdir}/redis
@@ -3409,8 +3401,27 @@ cd
 %endif
 
 %changelog
-* Fri Dec 21 2018 Lukas Berk <lberk@redhat.com> - 4.3.0-1
-- Work in progress, see https://pcp.io/roadmap
+* Fri Apr 26 2019 Nathan Scott <nathans@redhat.com> 4.3.2-1
+- Work in progress, see https://pcp.io.roadmap
+
+* Wed Feb 27 2019 Mark Goodwin <mgoodwin@redhat.com> - 4.3.1-1
+- Fixes pcp-dstat in --full (all instances) mode (BZ 1661912)
+- Remove package dependencies on initscripts (BZ 1592380)
+- Set include directory for cppcheck use (BZ 1663372)
+- Update to latest PCP sources.
+
+* Fri Dec 21 2018 Nathan Scott <nathans@redhat.com> - 4.3.0-1
+- Add the dstat -f/--full option to expand instances (BZ 1651536)
+- Improve systemd interaction for local pmie (BZ 1650999)
+- SELinux is preventing ps from 'search' accesses on the directory
+  .config (BZ 1569697)
+- SELinux is preventing pmdalinux from 'search' accesses on
+  the directory /var/lib/libvirt/images (BZ 1579988)
+- SELinux is preventing pmdalinux from 'unix_read' accesses
+  on the semáforo Unknown (BZ 1607658)
+- SELinux is preventing pmdalinux from 'unix_read' accesses
+  on the shared memory Unknown (BZ 1618756, BZ 1619381, BZ 1601721)
+- Update to latest PCP sources.
 
 * Fri Nov 16 2018 Mark Goodwin <mgoodwin@redhat.com> - 4.2.0-1
 - Resolves dstat packaging issues (BZ 1640912)

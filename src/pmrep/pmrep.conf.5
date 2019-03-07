@@ -1,6 +1,6 @@
 '\"macro stdmacro
 .\"
-.\" Copyright (C) 2015-2018 Marko Myllynen <myllynen@redhat.com>
+.\" Copyright (C) 2015-2019 Marko Myllynen <myllynen@redhat.com>
 .\"
 .\" This program is free software; you can redistribute it and/or modify it
 .\" under the terms of the GNU General Public License as published by the
@@ -222,11 +222,25 @@ Corresponding command line option is \fB\-R\fP.
 Allowed values are \fBdefault\fP or \fBraw\fP.
 .RE
 .PP
-ignore_incompat (string)
+ignore_incompat (boolean)
 .RS 4
 Indicates that incompatible metrics are to be ignored.
 Corresponding command line option is \fB\-I\fP.
 Defaults to \fBno\fP.
+.RE
+.PP
+ignore_unknown (boolean)
+.RS 4
+Indicates that unknown metrics are to be ignored.
+Corresponding command line option is \fB\-5\fP.
+Defaults to \fBno\fP.
+.RE
+.PP
+names_change (string)
+.RS 4
+Indicates the action to take on PMNS changes during sampling.
+Corresponding command line option is \fB\-4\fP.
+Defaults to \fBignore\fP.
 .RE
 .PP
 instances (string)
@@ -294,7 +308,14 @@ Corresponding command line option is \fB\-N\fP.
 Undefined by default.
 .RE
 .PP
-omit_flat (string)
+sort_metric (string)
+.RS 4
+Indicates the metrics to be used as sort reference metrics.
+Corresponding command line option is \fB\-6\fP.
+Undefined by default.
+.RE
+.PP
+omit_flat (boolean)
 .RS 4
 Indicates that single-valued ``flat'' metrics are to be omitted
 from reporting.

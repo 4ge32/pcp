@@ -1,5 +1,5 @@
 dnl
-dnl Copyright (c) 2012-2018 Red Hat.
+dnl Copyright (c) 2012-2019 Red Hat.
 dnl Copyright (c) 2008 Aconex.  All Rights Reserved.
 dnl Copyright (c) 2000-2004,2008 Silicon Graphics, Inc.  All Rights Reserved.
 dnl
@@ -131,14 +131,6 @@ AC_ARG_WITH([books-brand],
                     [choose the docbook brand when building the PCP books (default is common)])],
     [do_books_brand=$withval; PACKAGE_CONFIGURE="$PACKAGE_CONFIGURE --with-books-brand=$withval"],
     [do_books_brand=common])
-
-AC_ARG_WITH([papi],
-    [AC_HELP_STRING([--with-papi@<:@=DIR|=MODULE@:>@],
-		   [enable performance api counter pmda (default is on)
-		   The optional argument may be a full path of a PAPI installation prefix,
-		   or a pkgconfig module name.])],
-    [do_papi=$withval; PACKAGE_CONFIGURE="$PACKAGE_CONFIGURE --with-papi=$withval"],
-    [do_papi=check])
 
 AC_ARG_WITH([perfevent],
     [AC_HELP_STRING([--with-perfevent],
@@ -281,6 +273,7 @@ if test $target_os = linux
 then
     AC_DEFINE(IS_LINUX, [1], [Platform is Linux])
     test -f /etc/SuSE-release && target_distro=suse
+    grep -q 'ID_LIKE="suse"' /etc/os-release 2> /dev/null && target_distro=suse
     test -f /etc/fedora-release && target_distro=fedora
     test -f /etc/redhat-release && target_distro=redhat
     test -f /etc/debian_version && target_distro=debian
@@ -295,13 +288,23 @@ elif test $target_os = darwin
 then
     AC_DEFINE(IS_DARWIN, [1], [Platform is Darwin (Mac OS X)])
     target_distro=macosx
-    version=`sw_vers -productVersion | sed -e 's/\.//' -e 's/\..*//g'`
-    CFLAGS="-fPIC -no-cpp-precomp -fno-strict-aliasing -arch i386"
-    if test $version -ge 106
-    then
-	target_distro=cocoa
-	CFLAGS="$CFLAGS -arch x86_64"
-    fi
+    version=`sw_vers -productVersion`
+    CFLAGS="-fPIC -no-cpp-precomp -fno-strict-aliasing"
+    case "$version"
+    in
+	10.[0-5].*)
+	    dnl no knowledge before this ...
+	    ;;
+	10.[6-9].*|10.1[0-3].*)
+	    target_distro=cocoa
+	    CFLAGS="$CFLAGS -arch i386 -arch x86_64"
+	    ;;
+	*)
+	    dnl at least 10.14 (Mojave) ...
+	    target_distro=cocoa
+	    CFLAGS="$CFLAGS -arch x86_64"
+	    ;;
+    esac
     export CFLAGS
     pcp_platform_paths='/usr/local/bin'
     pcp_ps_all_flags="-axw -o user,pid,ppid,cpu,stime,tty,time,command"
@@ -345,7 +348,7 @@ then
     export CFLAGS="-fPIC -fno-strict-aliasing -D_GNU_SOURCE"
     pcp_platform_paths='/usr/bin/X11:/usr/local/bin'
     pcp_ps_all_flags=-efw
-elif test $target_os = netbsdelf
+elif test $target_os = netbsdelf -o $target_os = netbsd
 then
     target_os=netbsd
     AC_DEFINE(IS_NETBSD, [1], [Platform is NetBSD])
@@ -1203,6 +1206,10 @@ AS_IF([test "x$do_qt" != "xno"], [
     if test -z "$QMAKE"
     then
 	dnl default to qmake from qtchooser whenever it is available
+	dnl ... unfortunately this is not always correct, as when more
+	dnl than one Qt version is installed, the default may not be our
+	dnl preferred version, which is Qt5
+	AC_PATH_PROGS(QTCHOOSER, [qtchooser],, [$QTDIR/bin:/usr/lib/qtchooser:/usr/bin:/usr/lib64/qt5/bin:/usr/lib/qt5/bin:/usr/lib64/qt4/bin:/usr/lib/qt4/bin:/usr/local/bin])
 	AC_PATH_PROGS(QMAKE, [qmake qmake-qt5 qmake-qt4],, [$QTDIR/bin:/usr/lib/qtchooser:/usr/bin:/usr/lib64/qt5/bin:/usr/lib/qt5/bin:/usr/lib64/qt4/bin:/usr/lib/qt4/bin:/usr/local/bin])
 	test "x$cc_is_gcc" = xyes -a $target_os = solaris && QMAKE="$QMAKE -spec solaris-g++"
     fi
@@ -1211,12 +1218,33 @@ AS_IF([test "x$do_qt" != "xno"], [
     then
 	enable_qt=false
     else
-	AC_MSG_CHECKING([Qt version])
-	if test ! -z "$QT_SELECT"; then
-	    # fallback to Qt v4 if given preference is not successful
+	if test -n "$QT_SELECT"
+	then
+	    AC_MSG_CHECKING([Qt version, QT_SELECT=$QT_SELECT])
+	    dnl QT_SELECT set, check and fallback to Qt4 if given
+	    dnl preference is not successful
+	    export QT_SELECT
 	    $qmake --version 2>&1 >/dev/null
 	    if test $? -eq 1; then
 		export QT_SELECT=4
+	    fi
+	else
+	    dnl QT_SELECT not set, if we have qtchooser use that to see
+	    dnl if Qt5 is available, otherwise we fallthrough to the 
+	    dnl qmake default version
+	    if test -n "$QTCHOOSER"
+	    then
+		AC_MSG_CHECKING([Qt version, using qtchooser])
+		dnl if Qt5 appears to be present, pick that one, else Qt4
+		if $QTCHOOSER -l | grep '^5$' >/dev/null
+		then
+		    export QT_SELECT=5
+		else
+		    export QT_SELECT=4
+		fi
+	    else
+		AC_MSG_CHECKING([Qt version])
+		unset QT_SELECT
 	    fi
 	fi
 	eval `$qmake --version 2>&1 | awk '/Using Qt version/ { ver=4; print $ver }' | awk -F. '{ major=1; minor=2; point=3; printf "export QT_MAJOR=%d QT_MINOR=%d QT_POINT=%d\n",$major,$minor,$point }'`
@@ -1407,36 +1435,6 @@ test ! -x "$XZ" && XZ=/usr/freeware/bin/xz
 xz=$XZ
 test -z "$xz" && xz=no-xz
 AC_SUBST(xz)
-
-dnl Check for mac PackageMaker
-AC_MSG_CHECKING([for PackageMaker])
-if test -z "$PACKAGE_MAKER"
-then
-    if test $target_os = darwin
-    then
-	if test -x /Applications/PackageMaker.app/Contents/MacOS/PackageMaker
-	then # local XCode extras install
-	    package_maker=/Applications/PackageMaker.app/Contents/MacOS/PackageMaker
-	    AC_MSG_RESULT([ yes (local install)])
-	elif test -x /Developer/Applications/PackageMaker.app/Contents/MacOS/PackageMaker
-	then # Darwin 6.x
-	    package_maker=/Developer/Applications/PackageMaker.app/Contents/MacOS/PackageMaker
-	    AC_MSG_RESULT([ yes (darwin 6.x)])
-	elif test -x /Developer/Applications/Utilities/PackageMaker.app/Contents/MacOS/PackageMaker
-	then # Darwin 7.x
-	    AC_MSG_RESULT([ yes (darwin 7.x)])
-	    package_maker=/Developer/Applications/Utilities/PackageMaker.app/Contents/MacOS/PackageMaker
-	else
-	    AC_MSG_RESULT([ not found!])
-	    AC_MSG_WARN([PackageMaker not found, mac packages will not be made])
-	fi
-    else
-	AC_MSG_RESULT([ no])
-    fi
-else
-    package_maker="$PACKAGE_MAKER"
-fi
-AC_SUBST(package_maker)
 
 dnl check if the hdiutil program is available
 if test -z "$HDIUTIL"; then
@@ -1689,7 +1687,7 @@ then
 fi
 AC_SUBST(lib_for_regex)
 
-PKG_CHECK_MODULES([libuv], [libuv >= 1.0], [have_libuv=true], [have_libuv=false])
+PKG_CHECK_MODULES([libuv], [libuv >= 1.16], [have_libuv=true], [have_libuv=false])
 AC_SUBST(HAVE_LIBUV, [$have_libuv])
 
 PKG_CHECK_MODULES([libvarlink], [libvarlink], [have_libvarlink=true], [have_libvarlink=false])
@@ -1769,74 +1767,6 @@ AS_IF([test "x$do_infiniband" != "xno"], [
 AC_MSG_CHECKING([if the infiniband PMDA should be included])
 AC_SUBST(PMDA_INFINIBAND, $pmda_infiniband)
 if $pmda_infiniband; then AC_MSG_RESULT(yes); else AC_MSG_RESULT(no); fi
-
-pmda_papi=false
-AS_IF([test "x$do_papi" != "xno"], [
-    enable_papi=true
-
-    saved_LDFLAGS="$LDFLAGS"
-    saved_CFLAGS="$CFLAGS"
-    savedLIBS=$LIBS
-
-    dnl potentially from the environment, else empty
-    CFLAGS="$papi_CFLAGS"
-    LDFLAGS="$papi_LIBS"
-
-    case "$do_papi" in
-	yes|no|check)
-	    ;;
-	*/*)
-	    PAPI_ROOTDIR=$do_papi;
-	    CFLAGS="-I$PAPI_ROOTDIR/include"
-	    LDFLAGS="-L$PAPI_ROOTDIR/lib"
-	    ;;
-	 *)
-	    PKG_CHECK_MODULES(papi,[$do_papi],[
-		  CFLAGS="$papi_CFLAGS"
-		  LDFLAGS="$papi_LIBS"])
-	    ;;
-    esac
-
-    # $papi_LIBS may include -lpapi harmlessly redundantly with AC_CHECK_LIB
-    AC_CHECK_LIB([papi], [PAPI_library_init],
-		 [papi_libs="$LDFLAGS -lpapi"],
-		 [enable_papi=false])
-    AC_CHECK_HEADERS([papi.h], [papi_cflags="$CFLAGS"], [enable_papi=false])
-    if test "$do_papi" != "check" -a "$enable_papi" != "true"
-    then
-	AC_MSG_ERROR([PAPI is not installed, cannot enable the PAPI PMDA])
-    else
-	pmda_papi=$enable_papi
-    fi
-    LIBS=$savedLIBS
-    CFLAGS="$saved_CFLAGS"
-    LDFLAGS="$saved_LDFLAGS"
-    AC_SUBST(PAPI_CFLAGS, $papi_cflags)
-    AC_SUBST(PAPI_LIBS, $papi_libs)
-])
-AC_MSG_CHECKING([if the papi PMDA should be included])
-AC_SUBST(PMDA_PAPI, $pmda_papi)
-if $pmda_papi; then AC_MSG_RESULT(yes); else AC_MSG_RESULT(no); fi
-
-AS_IF([test "x$pmda_papi" = "xtrue"], [
-    	dnl check if struct PAPI_component_info_t has a disabled field
-	AC_MSG_CHECKING([whether struct PAPI_component_info_t has a disabled field])
-cat <<End-of-File >conftest.c
-#include <papi.h>
-int main() { PAPI_component_info_t *c; c->disabled = 0; }
-End-of-File
-	(eval $ac_compile) 2>conftest.out
-	cat conftest.out >&5
-    	if test -s conftest.out
-    	then
-	   AC_MSG_RESULT(no)
-    	else
-    	   AC_DEFINE(HAVE_PAPI_DISABLED_COMP, [1], [PAPI_component_info_t field])
-    	   AC_MSG_RESULT(yes)
-
-    	fi
-    	rm -f conftest.*
-])
 
 pmda_perfevent=false
 AS_IF([test "x$do_perfevent" = "xyes"], [
@@ -2481,6 +2411,9 @@ else
     cat <<End-of-File >conftest.c
 #include <sys/types.h>
 #include <unistd.h>
+#if defined pid_t	/* for NetBSD 8.0 */
+#undef pid_t
+#endif
 pid_t bozo;
 End-of-File
     _do_type
@@ -2496,6 +2429,7 @@ if test "$cross_compiling" = "yes"; then
     ans=$printf_fmt_int64
     echo "cross-compile -> \"$ans\"" >&5
 else
+    dnl first approach ... is there a #define that we can leverage?
     cat <<End-of-File >conftest.c
 #include <stdio.h>
 #include <stdint.h>
@@ -2509,7 +2443,7 @@ int main()
     /* Darwin */
     printf("%s\n", __PRI_64_LENGTH_MODIFIER__ "d");
 #else
-    bozo!	/* fall through to the hardway below */
+    bozo!	/* fall through to the second approach below */
 #endif
     return(0);
 }
@@ -2519,11 +2453,11 @@ End-of-File
     if test -x ./conftest
     then
 	ans=`./conftest`
-	echo "./conftest -> \"$ans\"" >&5
+	echo "./conftest (first approach) -> \"$ans\"" >&5
     fi
     if test -z "$ans"
     then
-	dnl have to try the hardway ...
+	dnl second approach _WORDSIZE may help ...
 	cat <<End-of-File >conftest.c
 #include <stdio.h>
 #include <stdint.h>
@@ -2538,17 +2472,10 @@ int main()
     printf("lld\n");
 #endif
 #else
-/* on NetBSD and OpenBSD, for example, there is no __WORDSIZE */
-    if (sizeof(long long) == 8)
-	printf("lld\n");
-    else if (sizeof(long) == 8)
-	printf("ld\n");
-    else if (sizeof(int) == 8)
-	printf("d\n");
-    else {
-	printf("no clue what printf format to use for __int64_t\n");
-	return(1);
-    }
+/*
+ * on NetBSD and OpenBSD, for example, there is no __WORDSIZE
+ * so fall through to the third approach below ...
+ */
 #endif
     return(0);
 }
@@ -2560,8 +2487,39 @@ End-of-File
 	    if test $target_os = mingw -a "$ans" = "lld"; then
 		ans='I64d'
 	    fi
-	    echo "./conftest -> \"$ans\"" >&5
+	    echo "./conftest (second approach) -> \"$ans\"" >&5
 	fi
+    fi
+    if test -z "$ans" -a "$GCC" = "yes"
+    then
+	dnl third approach, for gcc look for a printf format that
+	dnl does not produce compiler warnings
+	rm -f conftest.ans
+	for fmt in lld ld d
+	do
+	    cat <<End-of-File >conftest.$ac_ext
+#include <stdio.h>
+#include <sys/types.h>
+int main(void)
+{
+    int64_t	x = -1;
+    printf("%$fmt\n", x);
+    return 0;
+}
+End-of-File
+	    $CC -Wall $CFLAGS $CPPFLAGS -c conftest.$ac_ext 2>conftest.err
+	    if test -s conftest.err >/dev/null
+	    then
+		echo "-- not $fmt for fmt_64" >&5
+		cat conftest.err >&5
+	    else
+		echo "$fmt" >conftest.ans
+		echo "no warnings (third approach) -> \"$fmt\"" >&5
+		break
+	    fi
+	done
+	test -s conftest.ans && ans=`cat conftest.ans`
+	rm -f conftest.ans conftest.err
     fi
 fi
 if test -z "$ans"

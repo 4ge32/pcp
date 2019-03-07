@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2018 Red Hat.
+ * Copyright (c) 2017-2019 Red Hat.
  *
  * This library is free software; you can redistribute it and/or modify it
  * under the terms of the GNU Lesser General Public License as published
@@ -83,7 +83,7 @@ checkStatusReplyOK(redisInfoCallBack info, void *userdata,
 {
     va_list		argp;
 
-    if (reply->type == REDIS_REPLY_STATUS &&
+    if (reply && reply->type == REDIS_REPLY_STATUS &&
 	(strcmp("OK", reply->str) == 0 || strcmp("QUEUED", reply->str) == 0))
 	return 0;
     va_start(argp, format);
@@ -98,7 +98,7 @@ checkStreamReplyString(redisInfoCallBack info, void *userdata,
 {
     va_list		argp;
 
-    if (reply->type == REDIS_REPLY_STRING && strcmp(s, reply->str) == 0)
+    if (reply && reply->type == REDIS_REPLY_STRING && strcmp(s, reply->str) == 0)
 	return 0;
     va_start(argp, format);
     reportReplyError(info, userdata, reply, format, argp);
@@ -194,6 +194,7 @@ redis_map_request_callback(redisAsyncContext *redis, redisReply *reply, void *ar
     redisMapBaton	*baton = (redisMapBaton *)arg;
     redisSlots		*slots = (redisSlots *)baton->slots;
     const char		*mapname;
+    char		hash[42];
     sds			cmd, msg, key;
     int			newname;
 
@@ -207,7 +208,8 @@ redis_map_request_callback(redisAsyncContext *redis, redisReply *reply, void *ar
 	doneRedisMapBaton(baton);
     } else {
 	/* publish any newly created name mapping */
-	msg = sdscatfmt(sdsempty(), "%S:%S", baton->mapKey, baton->mapStr);
+	pmwebapi_hash_str((unsigned char *)baton->mapKey, hash, sizeof(hash));
+	msg = sdscatfmt(sdsempty(), "%S:%S", hash, baton->mapStr);
 	key = sdscatfmt(sdsempty(), "pcp:channel:%s", mapname);
 	cmd = redis_command(3);
 	cmd = redis_param_str(cmd, PUBLISH, PUBLISH_LEN);
@@ -259,7 +261,7 @@ redisGetMap(redisSlots *slots, redisMap *mapping, unsigned char *hash, sds mapSt
 	if ((baton = calloc(1, sizeof(redisMapBaton))) != NULL) {
 	    initRedisMapBaton(baton, slots, mapping, mapKey, mapStr,
 			    on_done, on_info, userdata, arg);
-	    redisMapInsert(mapping, mapKey, mapStr);
+	    redisMapInsert(mapping, mapKey, sdsdup(mapStr));
 	    redisMapRequest(baton, mapping, mapKey, mapStr);
 	} else {
 	    on_done(arg);
@@ -739,7 +741,7 @@ redis_series_metric(redisSlots *slots, metric_t *metric,
     }
 
     /* ensure all metric or instance label strings are mapped */
-    if (metric->desc.indom == PM_INDOM_NULL) {
+    if (metric->desc.indom == PM_INDOM_NULL || metric->u.vlist == NULL) {
 	series_metric_label_mapping(metric, baton);
     } else {
 	for (i = 0; i < metric->u.vlist->listcount; i++) {
@@ -873,16 +875,16 @@ redis_series_metadata(context_t *context, metric_t *metric, void *arg)
 
     seriesBatonReference(baton, "redis_series_metadata");
 
-    pmwebapi_hash_str(context->name.hash, hashbuf, sizeof(hashbuf));
-    key = sdscatfmt(sdsempty(), "pcp:series:source:%s", hashbuf);
+    pmwebapi_hash_str(context->name.id, hashbuf, sizeof(hashbuf));
+    key = sdscatfmt(sdsempty(), "pcp:series:context.name:%s", hashbuf);
     cmd = redis_command(2 + metric->numnames);
     cmd = redis_param_str(cmd, SADD, SADD_LEN);
     cmd = redis_param_sds(cmd, key);
     for (i = 0; i < metric->numnames; i++)
-        cmd = redis_param_sha(cmd, metric->names[i].hash);
+	cmd = redis_param_sha(cmd, metric->names[i].hash);
     redisSlotsRequest(slots, SADD, key, cmd, redis_series_source_callback, arg);
 
-    if (metric->desc.indom == PM_INDOM_NULL) {
+    if (metric->desc.indom == PM_INDOM_NULL || metric->u.vlist == NULL) {
 	redis_series_labelset(slots, metric, NULL, baton);
     } else {
 	for (i = 0; i < metric->u.vlist->listcount; i++) {
@@ -1023,6 +1025,15 @@ redis_series_stream_callback(redisAsyncContext *c, redisReply *reply, void *arg)
 }
 
 static void
+redis_series_timer_callback(redisAsyncContext *c, redisReply *reply, void *arg)
+{
+    seriesLoadBaton	*baton = (seriesLoadBaton *)arg;
+
+    seriesBatonCheckMagic(baton, MAGIC_LOAD, "redis_series_timer_callback");
+    doneSeriesLoadBaton(baton, "redis_series_timer_callback");
+}
+
+static void
 redis_series_stream(redisSlots *slots, sds stamp, metric_t *metric,
 		const char *hash, void *arg)
 {
@@ -1038,9 +1049,9 @@ redis_series_stream(redisSlots *slots, sds stamp, metric_t *metric,
 	return;
     }
     initRedisStreamBaton(baton, slots, stamp, hash, load);
-    seriesBatonReference(load, "redis_series_stream");
+    seriesBatonReferences(load, 2, "redis_series_stream");
 
-    count = 3;	/* XADD key stamp */
+    count = 6;	/* XADD key MAXLEN ~ len stamp */
     key = sdscatfmt(sdsempty(), "pcp:values:series:%s", hash);
 
     if ((sts = metric->error) < 0) {
@@ -1050,7 +1061,7 @@ redis_series_stream(redisSlots *slots, sds stamp, metric_t *metric,
     } else {
 	name = sdsempty();
 	type = metric->desc.type;
-	if (metric->desc.indom == PM_INDOM_NULL) {
+	if (metric->desc.indom == PM_INDOM_NULL || metric->u.vlist == NULL) {
 	    stream = series_stream_value(stream, name, type, &metric->u.atom);
 	    count += 2;
 	} else if (metric->u.vlist->listcount <= 0) {
@@ -1074,11 +1085,23 @@ redis_series_stream(redisSlots *slots, sds stamp, metric_t *metric,
     cmd = redis_command(count);
     cmd = redis_param_str(cmd, XADD, XADD_LEN);
     cmd = redis_param_sds(cmd, key);
+    cmd = redis_param_str(cmd, "MAXLEN", 6);	/* TODO: config file */
+    cmd = redis_param_str(cmd, "~", 1);
+    cmd = redis_param_str(cmd, "8640", 4);	/* 1 day, ~10 second delta */
     cmd = redis_param_sds(cmd, stamp);
     cmd = redis_param_raw(cmd, stream);
     sdsfree(stream);
 
     redisSlotsRequest(slots, XADD, key, cmd, redis_series_stream_callback, baton);
+
+
+    key = sdscatfmt(sdsempty(), "pcp:values:series:%s", hash);
+    cmd = redis_command(3);	/* EXPIRE key timer */
+    cmd = redis_param_str(cmd, EXPIRE, EXPIRE_LEN);
+    cmd = redis_param_sds(cmd, key);
+    cmd = redis_param_str(cmd, "86400", 5);	/* 1 day, TODO: config file */
+
+    redisSlotsRequest(slots, EXPIRE, key, cmd, redis_series_timer_callback, load);
 }
 
 static void
@@ -1156,7 +1179,7 @@ redis_load_version_callback(redisAsyncContext *c, redisReply *reply, void *arg)
 	batoninfo(baton, PMLOG_REQUEST, msg);
     } else if (reply->type != REDIS_REPLY_NIL) {
 	infofmt(msg, "unexpected schema version reply type (%s)",
-		redis_reply(reply->type));
+		redis_reply_type(reply));
 	batoninfo(baton, PMLOG_ERROR, msg);
     } else {
 	baton->version = 0;	/* NIL - no version key yet */
@@ -1250,7 +1273,7 @@ redis_load_keymap_callback(redisAsyncContext *c, redisReply *reply, void *arg)
 	batoninfo(baton, PMLOG_REQUEST, msg);
     } else if (reply->type != REDIS_REPLY_NIL) {
 	infofmt(msg, "unexpected command reply type (%s)",
-		redis_reply(reply->type));
+		redis_reply_type(reply));
 	batoninfo(baton, PMLOG_ERROR, msg);
     }
 
@@ -1484,40 +1507,166 @@ redisSlotsConnect(sds server, redisSlotsFlags flags,
     return NULL;
 }
 
-void
+seriesModuleData *
+getSeriesModuleData(pmSeriesModule *module)
+{
+    if (module->privdata == NULL)
+	module->privdata = calloc(1, sizeof(seriesModuleData));
+    return module->privdata;
+}
+
+int
+pmSeriesSetSlots(pmSeriesModule *module, void *slots)
+{
+    seriesModuleData	*data = getSeriesModuleData(module);
+
+    if (data) {
+	data->slots = (redisSlots *)slots;
+	return 0;
+    }
+    return -ENOMEM;
+}
+
+int
+pmSeriesSetHostSpec(pmSeriesModule *module, sds hostspec)
+{
+    seriesModuleData	*data = getSeriesModuleData(module);
+
+    if (data) {
+	data->hostspec = hostspec;
+	return 0;
+    }
+    return -ENOMEM;
+}
+
+int
+pmSeriesSetEventLoop(pmSeriesModule *module, void *events)
+{
+    seriesModuleData	*data = getSeriesModuleData(module);
+
+    if (data) {
+	data->events = (uv_loop_t *)events;
+	return 0;
+    }
+    return -ENOMEM;
+}
+
+int
+pmSeriesSetMetricRegistry(pmSeriesModule *module, void *registry)
+{
+    seriesModuleData	*data = getSeriesModuleData(module);
+
+    if (data) {
+	data->metrics = (mmv_registry_t *)registry;
+	return 0;
+    }
+    return -ENOMEM;
+}
+
+int
 pmSeriesSetup(pmSeriesModule *module, void *arg)
 {
+    seriesModuleData	*data = getSeriesModuleData(module);
+
     /* create global EVAL hashes and string map caches */
     redisScriptsInit();
     redisMapsInit();
 
     /* fast path for when Redis has been setup already */
-    if (module->slots) {
+    if (data == NULL) {
+	return -ENOMEM;
+    } else if (data->slots) {
 	module->on_setup(arg);
     } else {
 	/* establish initial basic connection to Redis instances */
-	module->slots = redisSlotsConnect(
-			module->hostspec, SLOTS_VERSION, module->on_info,
-			module->on_setup, arg, module->events, arg);
+	data->slots = redisSlotsConnect(
+			data->hostspec, SLOTS_VERSION, module->on_info,
+			module->on_setup, arg, data->events, arg);
     }
+    return 0;
 }
 
 void
 pmSeriesClose(pmSeriesModule *module)
 {
-    redisSlotsFree((redisSlots *)module->slots);
-//  memset(module, 0, sizeof(*module));
+    seriesModuleData	*data = (seriesModuleData *)module->privdata;
+
+    if (data) {
+	redisSlotsFree(data->slots);
+	memset(data, 0, sizeof(seriesModuleData));
+	free(data);
+    }
 }
 
-void
-pmDiscoverSetup(pmDiscoverSettings *settings, void *arg)
+discoverModuleData *
+getDiscoverModuleData(pmDiscoverModule *module)
 {
+    if (module->privdata == NULL)
+	module->privdata = calloc(1, sizeof(discoverModuleData));
+    return module->privdata;
+}
+
+int
+pmDiscoverSetSlots(pmDiscoverModule *module, void *slots)
+{
+    discoverModuleData	*data = getDiscoverModuleData(module);
+
+    if (data) {
+	data->slots = (redisSlots *)slots;
+	return 0;
+    }
+    return -ENOMEM;
+}
+
+int
+pmDiscoverSetHostSpec(pmDiscoverModule *module, sds hostspec)
+{
+    discoverModuleData	*data = getDiscoverModuleData(module);
+
+    if (data) {
+	data->hostspec = hostspec;
+	return 0;
+    }
+    return -ENOMEM;
+}
+
+int
+pmDiscoverSetEventLoop(pmDiscoverModule *module, void *events)
+{
+    discoverModuleData	*data = getDiscoverModuleData(module);
+
+    if (data) {
+	data->events = (uv_loop_t *)events;
+	return 0;
+    }
+    return -ENOMEM;
+}
+
+int
+pmDiscoverSetMetricRegistry(pmDiscoverModule *module, void *registry)
+{
+    discoverModuleData	*data = getDiscoverModuleData(module);
+
+    if (data) {
+	data->metrics = (mmv_registry_t *)registry;
+	return 0;
+    }
+    return -ENOMEM;
+}
+
+int
+pmDiscoverSetup(pmDiscoverModule *module, pmDiscoverCallBacks *cbs, void *arg)
+{
+    discoverModuleData	*data = getDiscoverModuleData(module);
     const char		fallback[] = "/var/log/pcp";
     const char		*paths[] = { "pmlogger", "pmmgr" };
     const char		*logdir = pmGetOptionalConfig("PCP_LOG_DIR");
     char		path[MAXPATHLEN];
     char		sep = pmPathSeparator();
-    int			i, handle;
+    int			i, count = 0;
+
+    if (data == NULL)
+	return -ENOMEM;
 
     /* create global EVAL hashes and string map caches */
     redisScriptsInit();
@@ -1530,17 +1679,23 @@ pmDiscoverSetup(pmDiscoverSettings *settings, void *arg)
 	pmsprintf(path, sizeof(path), "%s%c%s", logdir, sep, paths[i]);
 	if (access(path, F_OK) != 0)
 	    continue;
-	if ((handle = pmDiscoverRegister(path,
-			&settings->module, &settings->callbacks, arg)) < 0)
+	if ((data->handle = pmDiscoverRegister(path, module, cbs, arg)) < 0)
 	    continue;
 	/* coverity[DEADCODE] -- this is reached when HAVE_LIBUV is set */
-	settings->module.handle = handle;
+	count++;
+	break;
     }
+    return count ? 0 : -ESRCH;
 }
 
 void
-pmDiscoverClose(pmDiscoverSettings *settings)
+pmDiscoverClose(pmDiscoverModule *module)
 {
-    pmDiscoverUnregister(settings->module.handle);
-    memset(settings, 0, sizeof(*settings));
+    discoverModuleData	*discover = (discoverModuleData *)module->privdata;
+
+    if (discover) {
+	pmDiscoverUnregister(discover->handle);
+	memset(discover, 0, sizeof(*discover));
+	free(discover);
+    }
 }

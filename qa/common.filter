@@ -66,6 +66,20 @@ s/ i:[0-9] / i:? /
 s/lib=[^ ]*/lib=[OS]pmda.$DSO_SUFFIX/
 s/entry=[^ ]*/entry=[OS]_init/
 }' \
+	-e '/^netbsd.*pmda_netbsd/{
+s/netbsd/[OS]  /
+s/116/ ??/
+s/ i:[0-9] / i:? /
+s/lib=[^ ]*/lib=[OS]pmda.$DSO_SUFFIX/
+s/entry=[^ ]*/entry=[OS]_init/
+}' \
+	-e '/^openbsd.*pmda_openbsd/{
+s/openbsd/[OS]   /
+s/139/ ??/
+s/ i:[0-9] / i:? /
+s/lib=[^ ]*/lib=[OS]pmda.$DSO_SUFFIX/
+s/entry=[^ ]*/entry=[OS]_init/
+}' \
 	-e '/^solaris.*pmda_solaris/{
 s/solaris/[OS]   /
 s/75/??/
@@ -124,6 +138,27 @@ state == 2		{ print base,$0; next }
 state == 1 && /^=====/	{ state = 2; base = NR+1 }' \
     | LC_COLLATE=POSIX _POSIX2_VERSION=0 sort +0n -1 +2n -3 \
     | sed -e 's/^[^ ]* //'
+}
+
+# pmproxy log file
+#
+_filter_pmproxy_log()
+{
+    $PCP_AWK_PROG '
+/ok .* INADDR_ANY/			{ $2 = "FD" }
+/ok .*pmproxy.socket$/			{ $2 = "FD"; $4 = "UNIX_DOMAIN_SOCKET" }
+					{ print }' \
+    | sed \
+	-e 's/[A-Z][a-z][a-z] [A-Z][a-z][a-z]  *[0-9][0-9]* [0-9][0-9]:[0-9][0-9]:[0-9][0-9] [0-9][0-9][0-9][0-9]$/DATE/' \
+	-e 's/[A-Z][a-z][a-z] [A-Z][a-z][a-z]  *[0-9][0-9]* [0-9][0-9]:[0-9][0-9]:[0-9][0-9]/DATE/' \
+	-e '/pmproxy([0-9][0-9]*)/s//pmproxy(PID)/' \
+        -e '/^\(Log for pmproxy on\) [^ ][^ ]*/s//\1 HOST/' \
+	-e '/^pmproxy: PID/s/=.*/= PID/' \
+	-e 's/pmproxy([1-9][0-9]*) Error:/pmproxy(PID) Error:/' \
+	-e '/^pmproxy: Signalled (signal=[1-9][0-9]*).*/d' \
+	-e '/Info: connected to .* redis-server$/d' \
+	-e '/Info: .* setup$/d' \
+    #end
 }
 
 # pmlogger log file
@@ -265,7 +300,6 @@ _filter_optional_pmdas()
 	-e '/pmdaprometheus/d' \
 	-e '/pmdaoracle/d' \
 	-e '/pmdaoraping/d' \
-	-e '/pmdapapi/d' \
 	-e '/pmdapdns/d' \
 	-e '/pmdapmcd/d' \
 	-e '/pmdaproc/d' \
@@ -365,10 +399,10 @@ _filter_top_pmns()
 	-e '/^    nvidia /d' \
 	-e '/^    oracle /d' \
 	-e '/^    oraping /d' \
-	-e '/^    papi /d' \
 	-e '/^    pdns /d' \
 	-e '/^    perfevent /d' \
 	-e '/^    pipe /d' \
+	-e '/^    pmproxy /d' \
 	-e '/^    podman /d' \
 	-e '/^    postfix /d' \
 	-e '/^    postgresql /d' \
@@ -627,11 +661,13 @@ _filter_pmda_install()
 	-e '/Terminate PMDA/,/Updating the PMCD/c\
 Terminate PMDA if already installed ...\
 [...install files, make output...]\
-Updating the PMCD control file, and notifying PMCD ...' \
+Updating the PMCD control file, and notifying PMCD ...
+' \
 	-e '/Installing files/,/Updating the Performance Metrics/c\
 Installing files ...\
 [...install files, make output...]\
-Updating the Performance Metrics Name Space (PMNS) ...'
+Updating the Performance Metrics Name Space (PMNS) ...
+'
 }
 
 _filter_pmda_remove()

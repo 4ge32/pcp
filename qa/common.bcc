@@ -2,6 +2,7 @@
 # Common shell routines for testing pmdabcc
 #
 # Copyright (c) 2018 Andreas Gerstmayr.
+# Copyright (c) 2019 Red Hat.
 #
 
 # get standard environment, filters and checks
@@ -68,13 +69,60 @@ _pmdabcc_install()
 
 _pmdabcc_wait_for_metric()
 {
-    # Wait for the PMDA to compile the bcc modules and become ready, 30s max
-    for i in `seq 1 30`; do grep -q 'Ready to process requests' $PCP_LOG_DIR/pmcd/bcc.log && break; sleep 1; done
+    # Wait for the PMDA to compile the bcc modules and become ready, 60s max
+    _canwait=60
+    i=0
+    while [ $i -lt $_canwait ]
+    do
+	grep -q 'Ready to process requests' $PCP_LOG_DIR/pmcd/bcc.log && break
+	sleep 1
+	i=`expr $i + 1`
+    done
     sed -n '/Error:/,$p' $PCP_LOG_DIR/pmcd/bcc.log
-    if [ $i -ge 30 ]; then
-        echo PMDA was not ready in 30 seconds, test failed
-        exit
+    if [ $i -eq $_canwait ]; then
+        echo PMDA was not ready in $_canwait seconds, test failed
+        return 1
     fi
+    echo "=== _pmdabcc_wait_for_metric: after $i secs, metrics should be available ===" >>$here/$seq.full
+    # "should" be available, but now wait up to 20 seconds for values
+    # to be seen ...
+    #
+    _canwait=20
+    i=1
+    while [ $i -le $_canwait ]
+    do
+	touch $tmp.ok
+	pmprobe bcc \
+	| while read metric numval foo
+	do
+	    if [ "$numval" -lt 0 ]
+	    then
+		rm -f $tmp.ok
+		if [ $i -eq $_canwait ]
+		then
+		    # still bad on last iteration ... report
+		    #
+		    echo "_pmdabcc_wait_for_metric: Botch: bcc PMDA ready but metric $metric returns numval $numval (`pmerr $numval`)"
+		fi
+	    fi
+	done
+	if [ -f $tmp.ok ]
+	then
+	    # goodness
+	    #
+	    echo "=== _pmdabcc_wait_for_metric: after another $i secs, values are available ===" >>$here/$seq.full
+	    return 0
+	fi
+	sleep 1
+	i=`expr $i + 1`
+    done
+
+    # badness ...
+    #
+    echo "Here's the PMDA log ..."
+    cat $PCP_LOG_DIR/pmcd/bcc.log
+
+    return 0
 }
 
 _pmdabcc_wait_for_value()
@@ -125,22 +173,44 @@ _java_check()
             ;;
     esac
 
-    eval java_version=`java -version 2>&1 | grep version | awk '{ print $3 }'`
-    java_version=`echo "$java_version" | sed -e 's,_.*,,'`
-    java_major=`echo "$java_version" | sed -e 's,1.,,' -e 's,\..*,,'`
+    java_version=`java -version 2>&1 | awk '/version/ { print $3 }'`
+    java_version=`echo $java_version | tr -d '"' | sed -e 's,_.*,,'`
+    java_major=`echo $java_version   | sed -e 's,\..*,,g'`
 
     jvm_path=""
     for path in \
 	/etc/alternatives/jre/lib/server \
 	/etc/alternatives/jre/lib/$java_machine/server \
+	/usr/lib/jvm/java-${java_major}-openjdk-${java_machine}/lib/server \
 	/usr/lib/jvm/java-${java_version}-openjdk/jre/lib/${java_machine}/server \
 	/usr/lib/jvm/java-${java_major}-openjdk-${java_machine}/jre/lib/${java_machine}/server
     do
-        # echo "$path/libjvm.$DSO_SUFFIX"
         [ -f "$path/libjvm.$DSO_SUFFIX" ] && jvm_path="$path/libjvm.$DSO_SUFFIX"
     done
 
     [ -z "$jvm_path" ] && _notrun "libjvm.$DSO_SUFFIX not found"
+
+    for tplistcmd in /usr/share/bcc/tools/tplist tplist-bpfcc tplist
+    do
+        which $tplistcmd >/dev/null 2>&1 && \
+            probes=$($tplistcmd -l $java_path 2>/dev/null | grep thread__start)
+        [ -n "$probes" ] && return 0
+    done
+    _notrun "No Java USDT probes available"
+}
+
+_python_probe_check()
+{
+    python -c 'import time;time.sleep(5)' > /dev/null 2>&1 &
+    pypid=$!
+    probes=
+    for tplistcmd in /usr/share/bcc/tools/tplist tplist-bpfcc tplist
+    do
+        which $tplistcmd >/dev/null 2>&1 && \
+            probes=$($tplistcmd -p $pypid 2>/dev/null | grep function__entry)
+        [ -n "$probes" ] && return 0
+    done
+    _notrun "No Python USDT probes available"
 }
 
 _mount_filesystem()
@@ -180,11 +250,9 @@ _value_filter_exact()
     grep "value $1" > /dev/null && echo OK
 }
 
-# Marko's triage ...
 # openSUSE 15.0 bcc-0.5.0-lp150.9.2 is carrying a patch to backport bcc
 # upstream commit c0ca99a2 but not a subsequent fix made in upstream
 # commit d1a83c1b so bcc on openSUSE 15.0 is broken on this regard.
-#
 _bcc_check_ArgString()
 {
     if [ -f /etc/os-release ]

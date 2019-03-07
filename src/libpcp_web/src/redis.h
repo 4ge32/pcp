@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2018 Red Hat.
+ * Copyright (c) 2017-2019 Red Hat.
  * Copyright (c) 2009-2011, Salvatore Sanfilippo <antirez at gmail dot com>
  * Copyright (c) 2009-2014, Pieter Noordhuis <pcnoordhuis at gmail dot com>
  *
@@ -62,19 +62,20 @@
 /*
  * Redis protocol reply types
  */
-#define REDIS_REPLY_STRING	1
-#define REDIS_REPLY_ARRAY	2
-#define REDIS_REPLY_INTEGER	3
-#define REDIS_REPLY_NIL		4
-#define REDIS_REPLY_STATUS	5
-#define REDIS_REPLY_ERROR	6
-
-extern const char *redis_reply(int);
+typedef enum redisReplyType {
+    REDIS_REPLY_STRING		= 1,
+    REDIS_REPLY_ARRAY		= 2,
+    REDIS_REPLY_INTEGER		= 3,
+    REDIS_REPLY_NIL		= 4,
+    REDIS_REPLY_STATUS		= 5,
+    REDIS_REPLY_ERROR		= 6,
+    REDIS_REPLY_UNKNOWN		= -1
+} redisReplyType;
 
 #define REDIS_READER_MAX_BUF (1024*16)  /* Default max unused reader buffer. */
 
 typedef struct redisReadTask {
-    int			type;
+    enum redisReplyType	type;      /* REDIS_REPLY_* type of this task */
     int			elements;  /* number of elements in multibulk container */
     int			idx;       /* index in parent (array) object */
     void		*obj;      /* holds user-generated value for a read task */
@@ -153,11 +154,11 @@ int redisReaderGetReply(redisReader *r, void **reply);
  * SO_REUSEADDR is being used. */
 #define REDIS_CONNECT_RETRIES  10
 
-#define __redis_strerror_r(errno, buf, len) pmErrStr_r(-(errno), buf, len)
+#define __redis_strerror_r(errno, buf, len) pmErrStr_r(-(errno), (buf), (len))
 
 /* This is the reply object returned by redisCommand() */
 typedef struct redisReply {
-    int			type;       /* one of the REDIS_REPLY_* macros */
+    enum redisReplyType	type;       /* REDIS_REPLY_* type of this response */
     long long		integer;    /* value for type REDIS_REPLY_INTEGER */
     size_t		len;        /* length of string */
     char		*str;       /* used for both REDIS_REPLY_{ERROR,STRING} */
@@ -168,6 +169,8 @@ typedef struct redisReply {
 extern redisReader *redisReaderCreate(void);
 
 extern void freeReplyObject(void *);
+
+extern const char *redis_reply_type(redisReply *);
 
 enum redisConnectionType {
     REDIS_CONN_TCP,

@@ -747,11 +747,6 @@ PMDA_RPM
 PMDA_PODMAN
 PMDA_PERFEVENT
 PFM_LIBS
-PMDA_PAPI
-PAPI_LIBS
-PAPI_CFLAGS
-papi_LIBS
-papi_CFLAGS
 PMDA_INFINIBAND
 IB_LIBS
 PMDA_SYSTEMD
@@ -802,7 +797,6 @@ mkinstallp
 MKINSTALLP
 hdiutil
 HDIUTIL
-package_maker
 xz
 XZ
 lzma
@@ -826,6 +820,7 @@ enable_qt
 qt_version
 qt_release
 QMAKE
+QTCHOOSER
 PMDA_LIBVIRT
 PMDA_PROMETHEUS
 PMDA_LIO
@@ -1006,7 +1001,6 @@ with_python3
 with_dstat_symlink
 with_books
 with_books_brand
-with_papi
 with_perfevent
 with_pmdapodman
 with_pmdabcc
@@ -1068,8 +1062,6 @@ DEVMAPPER_CFLAGS
 DEVMAPPER_LIBS
 SYSTEMD_CFLAGS
 SYSTEMD_LIBS
-papi_CFLAGS
-papi_LIBS
 libmicrohttpd_CFLAGS
 libmicrohttpd_LIBS
 cairo_CFLAGS
@@ -1733,10 +1725,6 @@ Optional Packages:
   --with-books-brand=BRAND
                           choose the docbook brand when building the PCP books
                           (default is common)
-  --with-papi[=DIR|=MODULE]
-                          enable performance api counter pmda (default is on)
-                          The optional argument may be a full path of a PAPI
-                          installation prefix, or a pkgconfig module name.
   --with-perfevent        enable perfevent pmda (default is on)
   --with-pmdapodman       enable podman pmda (default is on)
   --with-pmdabcc          enable BCC pmda (default is on)
@@ -1816,8 +1804,6 @@ Some influential environment variables:
               C compiler flags for SYSTEMD, overriding pkg-config
   SYSTEMD_LIBS
               linker flags for SYSTEMD, overriding pkg-config
-  papi_CFLAGS C compiler flags for papi, overriding pkg-config
-  papi_LIBS   linker flags for papi, overriding pkg-config
   libmicrohttpd_CFLAGS
               C compiler flags for libmicrohttpd, overriding pkg-config
   libmicrohttpd_LIBS
@@ -2994,15 +2980,6 @@ fi
 
 
 
-# Check whether --with-papi was given.
-if test "${with_papi+set}" = set; then :
-  withval=$with_papi; do_papi=$withval; PACKAGE_CONFIGURE="$PACKAGE_CONFIGURE --with-papi=$withval"
-else
-  do_papi=check
-fi
-
-
-
 # Check whether --with-perfevent was given.
 if test "${with_perfevent+set}" = set; then :
   withval=$with_perfevent; do_perfevent=$withval; PACKAGE_CONFIGURE="$PACKAGE_CONFIGURE --with-perfevent=$withval"
@@ -3313,6 +3290,7 @@ then
 $as_echo "#define IS_LINUX 1" >>confdefs.h
 
     test -f /etc/SuSE-release && target_distro=suse
+    grep -q 'ID_LIKE="suse"' /etc/os-release 2> /dev/null && target_distro=suse
     test -f /etc/fedora-release && target_distro=fedora
     test -f /etc/redhat-release && target_distro=redhat
     test -f /etc/debian_version && target_distro=debian
@@ -3329,13 +3307,21 @@ then
 $as_echo "#define IS_DARWIN 1" >>confdefs.h
 
     target_distro=macosx
-    version=`sw_vers -productVersion | sed -e 's/\.//' -e 's/\..*//g'`
-    CFLAGS="-fPIC -no-cpp-precomp -fno-strict-aliasing -arch i386"
-    if test $version -ge 106
-    then
-	target_distro=cocoa
-	CFLAGS="$CFLAGS -arch x86_64"
-    fi
+    version=`sw_vers -productVersion`
+    CFLAGS="-fPIC -no-cpp-precomp -fno-strict-aliasing"
+    case "$version"
+    in
+	10.0-5.*)
+	    	    ;;
+	10.6-9.*|10.10-3.*)
+	    target_distro=cocoa
+	    CFLAGS="$CFLAGS -arch i386 -arch x86_64"
+	    ;;
+	*)
+	    	    target_distro=cocoa
+	    CFLAGS="$CFLAGS -arch x86_64"
+	    ;;
+    esac
     export CFLAGS
     pcp_platform_paths='/usr/local/bin'
     pcp_ps_all_flags="-axw -o user,pid,ppid,cpu,stime,tty,time,command"
@@ -3389,7 +3375,7 @@ $as_echo "#define IS_GNU 1" >>confdefs.h
     export CFLAGS="-fPIC -fno-strict-aliasing -D_GNU_SOURCE"
     pcp_platform_paths='/usr/bin/X11:/usr/local/bin'
     pcp_ps_all_flags=-efw
-elif test $target_os = netbsdelf
+elif test $target_os = netbsdelf -o $target_os = netbsd
 then
     target_os=netbsd
 
@@ -8102,7 +8088,53 @@ if test "x$do_qt" != "xno"; then :
 
     if test -z "$QMAKE"
     then
-		for ac_prog in qmake qmake-qt5 qmake-qt4
+					for ac_prog in qtchooser
+do
+  # Extract the first word of "$ac_prog", so it can be a program name with args.
+set dummy $ac_prog; ac_word=$2
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
+$as_echo_n "checking for $ac_word... " >&6; }
+if ${ac_cv_path_QTCHOOSER+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  case $QTCHOOSER in
+  [\\/]* | ?:[\\/]*)
+  ac_cv_path_QTCHOOSER="$QTCHOOSER" # Let the user override the test with a path.
+  ;;
+  *)
+  as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
+as_dummy="$QTDIR/bin:/usr/lib/qtchooser:/usr/bin:/usr/lib64/qt5/bin:/usr/lib/qt5/bin:/usr/lib64/qt4/bin:/usr/lib/qt4/bin:/usr/local/bin"
+for as_dir in $as_dummy
+do
+  IFS=$as_save_IFS
+  test -z "$as_dir" && as_dir=.
+    for ac_exec_ext in '' $ac_executable_extensions; do
+  if as_fn_executable_p "$as_dir/$ac_word$ac_exec_ext"; then
+    ac_cv_path_QTCHOOSER="$as_dir/$ac_word$ac_exec_ext"
+    $as_echo "$as_me:${as_lineno-$LINENO}: found $as_dir/$ac_word$ac_exec_ext" >&5
+    break 2
+  fi
+done
+  done
+IFS=$as_save_IFS
+
+  ;;
+esac
+fi
+QTCHOOSER=$ac_cv_path_QTCHOOSER
+if test -n "$QTCHOOSER"; then
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $QTCHOOSER" >&5
+$as_echo "$QTCHOOSER" >&6; }
+else
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+fi
+
+
+  test -n "$QTCHOOSER" && break
+done
+
+	for ac_prog in qmake qmake-qt5 qmake-qt4
 do
   # Extract the first word of "$ac_prog", so it can be a program name with args.
 set dummy $ac_prog; ac_word=$2
@@ -8155,13 +8187,30 @@ done
     then
 	enable_qt=false
     else
-	{ $as_echo "$as_me:${as_lineno-$LINENO}: checking Qt version" >&5
-$as_echo_n "checking Qt version... " >&6; }
-	if test ! -z "$QT_SELECT"; then
-	    # fallback to Qt v4 if given preference is not successful
+	if test -n "$QT_SELECT"
+	then
+	    { $as_echo "$as_me:${as_lineno-$LINENO}: checking Qt version, QT_SELECT=$QT_SELECT" >&5
+$as_echo_n "checking Qt version, QT_SELECT=$QT_SELECT... " >&6; }
+	    	    	    export QT_SELECT
 	    $qmake --version 2>&1 >/dev/null
 	    if test $? -eq 1; then
 		export QT_SELECT=4
+	    fi
+	else
+	    	    	    	    if test -n "$QTCHOOSER"
+	    then
+		{ $as_echo "$as_me:${as_lineno-$LINENO}: checking Qt version, using qtchooser" >&5
+$as_echo_n "checking Qt version, using qtchooser... " >&6; }
+				if $QTCHOOSER -l | grep '^5$' >/dev/null
+		then
+		    export QT_SELECT=5
+		else
+		    export QT_SELECT=4
+		fi
+	    else
+		{ $as_echo "$as_me:${as_lineno-$LINENO}: checking Qt version" >&5
+$as_echo_n "checking Qt version... " >&6; }
+		unset QT_SELECT
 	    fi
 	fi
 	eval `$qmake --version 2>&1 | awk '/Using Qt version/ { ver=4; print $ver }' | awk -F. '{ major=1; minor=2; point=3; printf "export QT_MAJOR=%d QT_MINOR=%d QT_POINT=%d\n",$major,$minor,$point }'`
@@ -8762,42 +8811,6 @@ test ! -x "$XZ" && XZ=/usr/local/bin/xz
 test ! -x "$XZ" && XZ=/usr/freeware/bin/xz
 xz=$XZ
 test -z "$xz" && xz=no-xz
-
-
-{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for PackageMaker" >&5
-$as_echo_n "checking for PackageMaker... " >&6; }
-if test -z "$PACKAGE_MAKER"
-then
-    if test $target_os = darwin
-    then
-	if test -x /Applications/PackageMaker.app/Contents/MacOS/PackageMaker
-	then # local XCode extras install
-	    package_maker=/Applications/PackageMaker.app/Contents/MacOS/PackageMaker
-	    { $as_echo "$as_me:${as_lineno-$LINENO}: result:  yes (local install)" >&5
-$as_echo " yes (local install)" >&6; }
-	elif test -x /Developer/Applications/PackageMaker.app/Contents/MacOS/PackageMaker
-	then # Darwin 6.x
-	    package_maker=/Developer/Applications/PackageMaker.app/Contents/MacOS/PackageMaker
-	    { $as_echo "$as_me:${as_lineno-$LINENO}: result:  yes (darwin 6.x)" >&5
-$as_echo " yes (darwin 6.x)" >&6; }
-	elif test -x /Developer/Applications/Utilities/PackageMaker.app/Contents/MacOS/PackageMaker
-	then # Darwin 7.x
-	    { $as_echo "$as_me:${as_lineno-$LINENO}: result:  yes (darwin 7.x)" >&5
-$as_echo " yes (darwin 7.x)" >&6; }
-	    package_maker=/Developer/Applications/Utilities/PackageMaker.app/Contents/MacOS/PackageMaker
-	else
-	    { $as_echo "$as_me:${as_lineno-$LINENO}: result:  not found!" >&5
-$as_echo " not found!" >&6; }
-	    { $as_echo "$as_me:${as_lineno-$LINENO}: WARNING: PackageMaker not found, mac packages will not be made" >&5
-$as_echo "$as_me: WARNING: PackageMaker not found, mac packages will not be made" >&2;}
-	fi
-    else
-	{ $as_echo "$as_me:${as_lineno-$LINENO}: result:  no" >&5
-$as_echo " no" >&6; }
-    fi
-else
-    package_maker="$PACKAGE_MAKER"
-fi
 
 
 if test -z "$HDIUTIL"; then
@@ -10458,12 +10471,12 @@ if test -n "$libuv_CFLAGS"; then
     pkg_cv_libuv_CFLAGS="$libuv_CFLAGS"
  elif test -n "$PKG_CONFIG"; then
     if test -n "$PKG_CONFIG" && \
-    { { $as_echo "$as_me:${as_lineno-$LINENO}: \$PKG_CONFIG --exists --print-errors \"libuv >= 1.0\""; } >&5
-  ($PKG_CONFIG --exists --print-errors "libuv >= 1.0") 2>&5
+    { { $as_echo "$as_me:${as_lineno-$LINENO}: \$PKG_CONFIG --exists --print-errors \"libuv >= 1.16\""; } >&5
+  ($PKG_CONFIG --exists --print-errors "libuv >= 1.16") 2>&5
   ac_status=$?
   $as_echo "$as_me:${as_lineno-$LINENO}: \$? = $ac_status" >&5
   test $ac_status = 0; }; then
-  pkg_cv_libuv_CFLAGS=`$PKG_CONFIG --cflags "libuv >= 1.0" 2>/dev/null`
+  pkg_cv_libuv_CFLAGS=`$PKG_CONFIG --cflags "libuv >= 1.16" 2>/dev/null`
 		      test "x$?" != "x0" && pkg_failed=yes
 else
   pkg_failed=yes
@@ -10475,12 +10488,12 @@ if test -n "$libuv_LIBS"; then
     pkg_cv_libuv_LIBS="$libuv_LIBS"
  elif test -n "$PKG_CONFIG"; then
     if test -n "$PKG_CONFIG" && \
-    { { $as_echo "$as_me:${as_lineno-$LINENO}: \$PKG_CONFIG --exists --print-errors \"libuv >= 1.0\""; } >&5
-  ($PKG_CONFIG --exists --print-errors "libuv >= 1.0") 2>&5
+    { { $as_echo "$as_me:${as_lineno-$LINENO}: \$PKG_CONFIG --exists --print-errors \"libuv >= 1.16\""; } >&5
+  ($PKG_CONFIG --exists --print-errors "libuv >= 1.16") 2>&5
   ac_status=$?
   $as_echo "$as_me:${as_lineno-$LINENO}: \$? = $ac_status" >&5
   test $ac_status = 0; }; then
-  pkg_cv_libuv_LIBS=`$PKG_CONFIG --libs "libuv >= 1.0" 2>/dev/null`
+  pkg_cv_libuv_LIBS=`$PKG_CONFIG --libs "libuv >= 1.16" 2>/dev/null`
 		      test "x$?" != "x0" && pkg_failed=yes
 else
   pkg_failed=yes
@@ -10501,9 +10514,9 @@ else
         _pkg_short_errors_supported=no
 fi
         if test $_pkg_short_errors_supported = yes; then
-	        libuv_PKG_ERRORS=`$PKG_CONFIG --short-errors --print-errors --cflags --libs "libuv >= 1.0" 2>&1`
+	        libuv_PKG_ERRORS=`$PKG_CONFIG --short-errors --print-errors --cflags --libs "libuv >= 1.16" 2>&1`
         else
-	        libuv_PKG_ERRORS=`$PKG_CONFIG --print-errors --cflags --libs "libuv >= 1.0" 2>&1`
+	        libuv_PKG_ERRORS=`$PKG_CONFIG --print-errors --cflags --libs "libuv >= 1.16" 2>&1`
         fi
 	# Put the nasty error message in config.log where it belongs
 	echo "$libuv_PKG_ERRORS" >&5
@@ -11141,229 +11154,6 @@ PMDA_INFINIBAND=$pmda_infiniband
 if $pmda_infiniband; then { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
 $as_echo "yes" >&6; }; else { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
 $as_echo "no" >&6; }; fi
-
-pmda_papi=false
-if test "x$do_papi" != "xno"; then :
-
-    enable_papi=true
-
-    saved_LDFLAGS="$LDFLAGS"
-    saved_CFLAGS="$CFLAGS"
-    savedLIBS=$LIBS
-
-        CFLAGS="$papi_CFLAGS"
-    LDFLAGS="$papi_LIBS"
-
-    case "$do_papi" in
-	yes|no|check)
-	    ;;
-	*/*)
-	    PAPI_ROOTDIR=$do_papi;
-	    CFLAGS="-I$PAPI_ROOTDIR/include"
-	    LDFLAGS="-L$PAPI_ROOTDIR/lib"
-	    ;;
-	 *)
-
-pkg_failed=no
-{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for papi" >&5
-$as_echo_n "checking for papi... " >&6; }
-
-if test -n "$papi_CFLAGS"; then
-    pkg_cv_papi_CFLAGS="$papi_CFLAGS"
- elif test -n "$PKG_CONFIG"; then
-    if test -n "$PKG_CONFIG" && \
-    { { $as_echo "$as_me:${as_lineno-$LINENO}: \$PKG_CONFIG --exists --print-errors \"\$do_papi\""; } >&5
-  ($PKG_CONFIG --exists --print-errors "$do_papi") 2>&5
-  ac_status=$?
-  $as_echo "$as_me:${as_lineno-$LINENO}: \$? = $ac_status" >&5
-  test $ac_status = 0; }; then
-  pkg_cv_papi_CFLAGS=`$PKG_CONFIG --cflags "$do_papi" 2>/dev/null`
-		      test "x$?" != "x0" && pkg_failed=yes
-else
-  pkg_failed=yes
-fi
- else
-    pkg_failed=untried
-fi
-if test -n "$papi_LIBS"; then
-    pkg_cv_papi_LIBS="$papi_LIBS"
- elif test -n "$PKG_CONFIG"; then
-    if test -n "$PKG_CONFIG" && \
-    { { $as_echo "$as_me:${as_lineno-$LINENO}: \$PKG_CONFIG --exists --print-errors \"\$do_papi\""; } >&5
-  ($PKG_CONFIG --exists --print-errors "$do_papi") 2>&5
-  ac_status=$?
-  $as_echo "$as_me:${as_lineno-$LINENO}: \$? = $ac_status" >&5
-  test $ac_status = 0; }; then
-  pkg_cv_papi_LIBS=`$PKG_CONFIG --libs "$do_papi" 2>/dev/null`
-		      test "x$?" != "x0" && pkg_failed=yes
-else
-  pkg_failed=yes
-fi
- else
-    pkg_failed=untried
-fi
-
-
-
-if test $pkg_failed = yes; then
-   	{ $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
-$as_echo "no" >&6; }
-
-if $PKG_CONFIG --atleast-pkgconfig-version 0.20; then
-        _pkg_short_errors_supported=yes
-else
-        _pkg_short_errors_supported=no
-fi
-        if test $_pkg_short_errors_supported = yes; then
-	        papi_PKG_ERRORS=`$PKG_CONFIG --short-errors --print-errors --cflags --libs "$do_papi" 2>&1`
-        else
-	        papi_PKG_ERRORS=`$PKG_CONFIG --print-errors --cflags --libs "$do_papi" 2>&1`
-        fi
-	# Put the nasty error message in config.log where it belongs
-	echo "$papi_PKG_ERRORS" >&5
-
-	as_fn_error $? "Package requirements ($do_papi) were not met:
-
-$papi_PKG_ERRORS
-
-Consider adjusting the PKG_CONFIG_PATH environment variable if you
-installed software in a non-standard prefix.
-
-Alternatively, you may set the environment variables papi_CFLAGS
-and papi_LIBS to avoid the need to call pkg-config.
-See the pkg-config man page for more details." "$LINENO" 5
-elif test $pkg_failed = untried; then
-     	{ $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
-$as_echo "no" >&6; }
-	{ { $as_echo "$as_me:${as_lineno-$LINENO}: error: in \`$ac_pwd':" >&5
-$as_echo "$as_me: error: in \`$ac_pwd':" >&2;}
-as_fn_error $? "The pkg-config script could not be found or is too old.  Make sure it
-is in your PATH or set the PKG_CONFIG environment variable to the full
-path to pkg-config.
-
-Alternatively, you may set the environment variables papi_CFLAGS
-and papi_LIBS to avoid the need to call pkg-config.
-See the pkg-config man page for more details.
-
-To get pkg-config, see <http://pkg-config.freedesktop.org/>.
-See \`config.log' for more details" "$LINENO" 5; }
-else
-	papi_CFLAGS=$pkg_cv_papi_CFLAGS
-	papi_LIBS=$pkg_cv_papi_LIBS
-        { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
-$as_echo "yes" >&6; }
-
-		  CFLAGS="$papi_CFLAGS"
-		  LDFLAGS="$papi_LIBS"
-fi
-	    ;;
-    esac
-
-    # $papi_LIBS may include -lpapi harmlessly redundantly with AC_CHECK_LIB
-    { $as_echo "$as_me:${as_lineno-$LINENO}: checking for PAPI_library_init in -lpapi" >&5
-$as_echo_n "checking for PAPI_library_init in -lpapi... " >&6; }
-if ${ac_cv_lib_papi_PAPI_library_init+:} false; then :
-  $as_echo_n "(cached) " >&6
-else
-  ac_check_lib_save_LIBS=$LIBS
-LIBS="-lpapi  $LIBS"
-cat confdefs.h - <<_ACEOF >conftest.$ac_ext
-/* end confdefs.h.  */
-
-/* Override any GCC internal prototype to avoid an error.
-   Use char because int might match the return type of a GCC
-   builtin and then its argument prototype would still apply.  */
-#ifdef __cplusplus
-extern "C"
-#endif
-char PAPI_library_init ();
-int
-main ()
-{
-return PAPI_library_init ();
-  ;
-  return 0;
-}
-_ACEOF
-if ac_fn_c_try_link "$LINENO"; then :
-  ac_cv_lib_papi_PAPI_library_init=yes
-else
-  ac_cv_lib_papi_PAPI_library_init=no
-fi
-rm -f core conftest.err conftest.$ac_objext \
-    conftest$ac_exeext conftest.$ac_ext
-LIBS=$ac_check_lib_save_LIBS
-fi
-{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_papi_PAPI_library_init" >&5
-$as_echo "$ac_cv_lib_papi_PAPI_library_init" >&6; }
-if test "x$ac_cv_lib_papi_PAPI_library_init" = xyes; then :
-  papi_libs="$LDFLAGS -lpapi"
-else
-  enable_papi=false
-fi
-
-    for ac_header in papi.h
-do :
-  ac_fn_c_check_header_mongrel "$LINENO" "papi.h" "ac_cv_header_papi_h" "$ac_includes_default"
-if test "x$ac_cv_header_papi_h" = xyes; then :
-  cat >>confdefs.h <<_ACEOF
-#define HAVE_PAPI_H 1
-_ACEOF
- papi_cflags="$CFLAGS"
-else
-  enable_papi=false
-fi
-
-done
-
-    if test "$do_papi" != "check" -a "$enable_papi" != "true"
-    then
-	as_fn_error $? "PAPI is not installed, cannot enable the PAPI PMDA" "$LINENO" 5
-    else
-	pmda_papi=$enable_papi
-    fi
-    LIBS=$savedLIBS
-    CFLAGS="$saved_CFLAGS"
-    LDFLAGS="$saved_LDFLAGS"
-    PAPI_CFLAGS=$papi_cflags
-
-    PAPI_LIBS=$papi_libs
-
-
-fi
-{ $as_echo "$as_me:${as_lineno-$LINENO}: checking if the papi PMDA should be included" >&5
-$as_echo_n "checking if the papi PMDA should be included... " >&6; }
-PMDA_PAPI=$pmda_papi
-
-if $pmda_papi; then { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
-$as_echo "yes" >&6; }; else { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
-$as_echo "no" >&6; }; fi
-
-if test "x$pmda_papi" = "xtrue"; then :
-
-    		{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether struct PAPI_component_info_t has a disabled field" >&5
-$as_echo_n "checking whether struct PAPI_component_info_t has a disabled field... " >&6; }
-cat <<End-of-File >conftest.c
-#include <papi.h>
-int main() { PAPI_component_info_t *c; c->disabled = 0; }
-End-of-File
-	(eval $ac_compile) 2>conftest.out
-	cat conftest.out >&5
-    	if test -s conftest.out
-    	then
-	   { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
-$as_echo "no" >&6; }
-    	else
-
-$as_echo "#define HAVE_PAPI_DISABLED_COMP 1" >>confdefs.h
-
-    	   { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
-$as_echo "yes" >&6; }
-
-    	fi
-    	rm -f conftest.*
-
-fi
 
 pmda_perfevent=false
 if test "x$do_perfevent" = "xyes"; then :
@@ -13146,6 +12936,9 @@ else
     cat <<End-of-File >conftest.c
 #include <sys/types.h>
 #include <unistd.h>
+#if defined pid_t	/* for NetBSD 8.0 */
+#undef pid_t
+#endif
 pid_t bozo;
 End-of-File
     _do_type
@@ -13162,7 +12955,7 @@ if test "$cross_compiling" = "yes"; then
     ans=$printf_fmt_int64
     echo "cross-compile -> \"$ans\"" >&5
 else
-    cat <<End-of-File >conftest.c
+        cat <<End-of-File >conftest.c
 #include <stdio.h>
 #include <stdint.h>
 #include <inttypes.h>
@@ -13175,7 +12968,7 @@ int main()
     /* Darwin */
     printf("%s\n", __PRI_64_LENGTH_MODIFIER__ "d");
 #else
-    bozo!	/* fall through to the hardway below */
+    bozo!	/* fall through to the second approach below */
 #endif
     return(0);
 }
@@ -13185,7 +12978,7 @@ End-of-File
     if test -x ./conftest
     then
 	ans=`./conftest`
-	echo "./conftest -> \"$ans\"" >&5
+	echo "./conftest (first approach) -> \"$ans\"" >&5
     fi
     if test -z "$ans"
     then
@@ -13203,17 +12996,10 @@ int main()
     printf("lld\n");
 #endif
 #else
-/* on NetBSD and OpenBSD, for example, there is no __WORDSIZE */
-    if (sizeof(long long) == 8)
-	printf("lld\n");
-    else if (sizeof(long) == 8)
-	printf("ld\n");
-    else if (sizeof(int) == 8)
-	printf("d\n");
-    else {
-	printf("no clue what printf format to use for __int64_t\n");
-	return(1);
-    }
+/*
+ * on NetBSD and OpenBSD, for example, there is no __WORDSIZE
+ * so fall through to the third approach below ...
+ */
 #endif
     return(0);
 }
@@ -13225,8 +13011,37 @@ End-of-File
 	    if test $target_os = mingw -a "$ans" = "lld"; then
 		ans='I64d'
 	    fi
-	    echo "./conftest -> \"$ans\"" >&5
+	    echo "./conftest (second approach) -> \"$ans\"" >&5
 	fi
+    fi
+    if test -z "$ans" -a "$GCC" = "yes"
+    then
+			rm -f conftest.ans
+	for fmt in lld ld d
+	do
+	    cat <<End-of-File >conftest.$ac_ext
+#include <stdio.h>
+#include <sys/types.h>
+int main(void)
+{
+    int64_t	x = -1;
+    printf("%$fmt\n", x);
+    return 0;
+}
+End-of-File
+	    $CC -Wall $CFLAGS $CPPFLAGS -c conftest.$ac_ext 2>conftest.err
+	    if test -s conftest.err >/dev/null
+	    then
+		echo "-- not $fmt for fmt_64" >&5
+		cat conftest.err >&5
+	    else
+		echo "$fmt" >conftest.ans
+		echo "no warnings (third approach) -> \"$fmt\"" >&5
+		break
+	    fi
+	done
+	test -s conftest.ans && ans=`cat conftest.ans`
+	rm -f conftest.ans conftest.err
     fi
 fi
 if test -z "$ans"

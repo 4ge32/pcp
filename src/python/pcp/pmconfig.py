@@ -1,4 +1,5 @@
-# Copyright (C) 2015-2018 Marko Myllynen <myllynen@redhat.com>
+#
+# Copyright (C) 2015-2019 Marko Myllynen <myllynen@redhat.com>
 #
 # This program is free software; you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by the
@@ -19,6 +20,7 @@
 
 """ PCP Python Utils Config Routines """
 
+from copy import deepcopy
 from collections import OrderedDict
 try:
     import configparser as ConfigParser
@@ -69,6 +71,9 @@ class pmConfig(object):
 
         # Pass data with pmTraversePMNS
         self._tmp = []
+
+        # Store configured metrics to avoid rereading on PMNS updates
+        self._conf_metrics = OrderedDict()
 
     def set_signal_handler(self):
         """ Set default signal handler """
@@ -291,7 +296,7 @@ class pmConfig(object):
                 self.parse_verbose_metric_info(metrics, key, spec, value)
 
     def prepare_metrics(self):
-        """ Construct and prepare the initial metricset """
+        """ Construct and prepare metricset """
         metrics = self.util.opts.pmGetOperands()
         if not metrics:
             sys.stderr.write("No metrics specified.\n")
@@ -353,7 +358,7 @@ class pmConfig(object):
                 else:
                     raise IOError("Metricset definition '%s' not found." % metric)
 
-        # Create the combined metricset
+        # Create combined metricset
         if self.util.globals == 1:
             for metric in globmet:
                 self.util.metrics[metric] = globmet[metric]
@@ -367,6 +372,8 @@ class pmConfig(object):
 
         if not self.util.metrics:
             raise IOError("No metrics specified.")
+
+        self._conf_metrics = deepcopy(self.util.metrics)
 
     def do_live_filtering(self):
         """ Check if doing live filtering """
@@ -434,6 +441,12 @@ class pmConfig(object):
             sys.stderr.write("Invalid metric %s (%s).\n" % (metric, str(error)))
             sys.exit(1)
 
+    def ignore_unknown_metrics(self):
+        """ Check if unknown metrics are ignored """
+        if hasattr(self.util, 'ignore_unknown') and self.util.ignore_unknown:
+            return True
+        return False
+
     def format_metric_label(self, label):
         """ Format a metric text label """
         # See src/libpcp/src/units.c
@@ -491,12 +504,16 @@ class pmConfig(object):
 
     def validate_metrics(self, curr_insts=CURR_INSTS, max_insts=MAX_INSTS):
         """ Validate the metricset """
+        # Check the metrics against PMNS, resolve non-leaf metrics
+
+        if not hasattr(self.util, 'leaf_only'):
+            self.util.metrics = deepcopy(self._conf_metrics)
+
         if hasattr(self.util, 'predicate') and self.util.predicate:
             for predicate in self.util.predicate.split(","):
                 if predicate not in self.util.metrics:
                     self.util.metrics[predicate] = ['', []]
 
-        # Check the metrics against PMNS, resolve non-leaf metrics
         if self.util.derived:
             for derived in filter(None, self.util.derived.split(";")):
                 if derived.startswith("/") or derived.startswith("."):
@@ -535,7 +552,6 @@ class pmConfig(object):
 
             def metric_base_check(metric):
                 """ Helper to support non-leaf metricspecs """
-                from copy import deepcopy
                 if metric != self._tmp:
                     if metric not in self.util.metrics:
                         self.util.metrics[metric] = deepcopy(metrics[self._tmp])
@@ -548,8 +564,19 @@ class pmConfig(object):
                 try:
                     self.util.context.pmTraversePMNS(metric, metric_base_check)
                 except pmapi.pmErr as error:
-                    from copy import deepcopy
-                    self.util.metrics[metric] = deepcopy(metrics[metric])
+                    if error.args[0] != pmapi.c_api.PM_ERR_NAME:
+                        raise
+                    # Ignore unknown metrics if so requested
+                    ignore = False
+                    try:
+                        self.util.context.pmLookupName(metric)
+                    except pmapi.pmErr as error:
+                        if error.args[0] != pmapi.c_api.PM_ERR_NAME:
+                            raise
+                        if self.ignore_unknown_metrics() and metric in self._conf_metrics:
+                            ignore = True
+                    if not ignore:
+                        self.util.metrics[metric] = deepcopy(metrics[metric])
 
         metrics = self.util.metrics
         self.util.metrics = OrderedDict()
@@ -569,7 +596,7 @@ class pmConfig(object):
                 sys.exit(1)
 
         # Exit if no metrics with specified instances found
-        if not self.insts:
+        if not self.insts and not self.ignore_unknown_metrics():
             sys.stderr.write("No matching instances found.\n")
             # Try to help the user to get the instance specifications right
             if self.util.instances:
@@ -577,7 +604,7 @@ class pmConfig(object):
                 print(self.util.instances)
             sys.exit(1)
 
-        # Finalize the metricset
+        # Finalize metricset
         incompat_metrics = OrderedDict()
         for i, metric in enumerate(self.util.metrics):
             # Fill in all fields for easier checking later
@@ -803,7 +830,10 @@ class pmConfig(object):
 
         # Verify that we have valid metrics
         if not self.util.metrics:
-            sys.stderr.write("No compatible metrics found.\n")
+            if not self.ignore_unknown_metrics():
+                sys.stderr.write("No compatible metrics found.\n")
+            else:
+                sys.stderr.write("Not one known metric found.\n")
             sys.exit(1)
 
         if hasattr(self.util, 'predicate') and self.util.predicate:
@@ -837,6 +867,55 @@ class pmConfig(object):
         if float(self.util.interval) <= 0:
             sys.stderr.write("Interval must be greater than zero.\n")
             sys.exit(1)
+
+    def clear_metrics(self):
+        """ Clear metricset """
+        self.util.metrics = OrderedDict()
+        self.pmids = []
+        self.descs = []
+        self.insts = []
+        self.util.pmfg.clear()
+        self.util.pmfg_ts = None
+
+    def update_metrics(self, curr_insts=CURR_INSTS, max_insts=MAX_INSTS):
+        """ Update metricset """
+        self.clear_metrics()
+        self.util.pmfg_ts = self.util.pmfg.extend_timestamp()
+        self.validate_metrics(curr_insts, max_insts)
+
+    def names_change_action(self):
+        """ Action to take when namespace change occurs:
+            ignore=0, abort=1, update=2 """
+        if hasattr(self.util, 'names_change'):
+            return self.util.names_change
+        return 0 # By default ignore name change notification from pmcd(1)
+
+    def fetch(self):
+        """ Sample using fetchgroup and handle special cases """
+        try:
+            state = self.util.pmfg.fetch()
+        except pmapi.pmErr as error:
+            if error.args[0] == pmapi.c_api.PM_ERR_EOL:
+                return -1
+            raise error
+
+        # Watch for end time in uninterpolated mode
+        if not self.util.interpol:
+            sample = self.util.pmfg_ts().strftime('%s')
+            finish = self.util.opts.pmGetOptionFinish()
+            if float(sample) > float(finish):
+                return -2
+
+        # Handle any PMCD state change notification
+        if state & pmapi.c_api.PMCD_NAMES_CHANGE:
+            action = self.names_change_action()
+            if action == 1:
+                return -3
+            elif action == 2:
+                return 1
+
+        # Successfully completed sampling
+        return 0
 
     def pause(self):
         """ Pause before next sampling """
@@ -878,22 +957,23 @@ class pmConfig(object):
                 sys.stderr.write("Predicate metric %s filtered out.\n" % predicate)
                 sys.exit(1)
 
-            index = len(self.util.metrics) # Sentinel
-            for i, metric in enumerate(self.util.metrics):
-                if metric == predicate:
-                    index = i
-                    self._pred_indom.append(self.descs[i].contents.indom)
-                    break
+            i = list(self.util.metrics.keys()).index(predicate)
+            self._pred_indom.append(self.descs[i].contents.indom)
 
-            if self.insts[index][0][0] == pmapi.c_api.PM_IN_NULL:
+            if self.insts[i][0][0] == pmapi.c_api.PM_IN_NULL:
                 sys.stderr.write("Predicate metric must have instances.\n")
                 sys.exit(1)
 
-            if self.descs[index].contents.type == pmapi.c_api.PM_TYPE_STRING:
+            if self.descs[i].contents.type == pmapi.c_api.PM_TYPE_STRING:
                 sys.stderr.write("Predicate metric values must be numeric.\n")
                 sys.exit(1)
 
-    def get_sorted_results(self):
+    # Deprecated, use get_ranked_results() below instead
+    def get_sorted_results(self, valid_only=False):
+        """ Deprecated, use get_ranked_results() instead """
+        return self.get_ranked_results(valid_only)
+
+    def get_ranked_results(self, valid_only=False):
         """ Get filtered and ranked results """
         results = OrderedDict()
         if hasattr(self.util, 'predicate') and self.util.predicate:
@@ -926,6 +1006,12 @@ class pmConfig(object):
             except Exception:
                 pass
 
+            if valid_only and not results[metric]:
+                del results[metric]
+
+        if not results:
+            return results
+
         if predicates:
             pred_insts = {}
             for i, predicate in enumerate(predicates):
@@ -934,7 +1020,7 @@ class pmConfig(object):
                 if p not in pred_insts:
                     pred_insts[p] = []
                 pred_insts[p].extend(x[0] for x in results[predicate] if x[0] not in pred_insts[p])
-            for i, metric in enumerate(results):
+            for metric in results:
                 if metric in predicates:
                     # Predicate instance values may all get filtered,
                     # but other metrics' instance values may be above
@@ -946,6 +1032,7 @@ class pmConfig(object):
                         elif limit < 0:
                             results[metric] = [x for x in results[metric] if x[2] <= abs(limit)]
                     continue
+                i = list(self.util.metrics.keys()).index(metric)
                 if self.descs[i].contents.indom not in self._pred_indom:
                     results[metric] = self.rank(results[metric])
                     continue

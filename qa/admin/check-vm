@@ -4,11 +4,33 @@
 # and packages
 #
 
+if [ -f /etc/pcp.conf ]
+then
+    . /etc/pcp.conf
+else
+    # punt
+    #
+    case `uname`
+    in
+	Darwin)
+	    PCP_ECHO_PROG=echo
+	    PCP_ECHO_N=
+	    PCP_ECHO_C='\c'
+	    ;;
+	*)
+	    PCP_ECHO_PROG=echo
+	    PCP_ECHO_N=-n
+	    PCP_ECHO_C=
+	    ;;
+    esac
+fi
+
 # same function is in allow-pmlc-access ... need to track changes
 #
 _getnetworkaddr()
 {
     __verbose=false
+    $very_verbose && __verbose=true
     if `which hostname >/dev/null 2>&1`
     then
 	host=`hostname`
@@ -25,8 +47,20 @@ _getnetworkaddr()
 		    # inet 192.168.1.100  netmask 255.255.255.0  ...
 		    # or
 		    # inet addr:192.168.1.224  Bcast:192.168.1.255  Mask:255.255.255.0
+		    # or
+		    # inet 192.168.1.238/24 broadcast 192.168.1.255 flags 0x0
 		    #
-		    mask=`ifconfig | grep "[ :]$addr " | sed -e 's/.*ask[ :]\([^ ][^ ]*\).*/\1/'`
+		    __config=`ifconfig | grep "[ :]$addr[ /]"`
+		    if echo "$__config" | grep '[Mm]ask' >/dev/null
+		    then
+			mask=`echo "$__config" | sed -e 's/.*ask[ :]\([^ ][^ ]*\).*/\1/'`
+		    elif echo "$__config" | grep " $addr/" >/dev/null
+		    then
+			mask=`echo "$__config" | sed -e '/\/24/s/.*/255.255.255.0/'`
+		    else
+			echo "_getnetworkaddr: botched config line: $__config" >&2
+			mask=''
+		    fi
 		    $__verbose && echo "_getnetworkaddr: ifconfig -> mask=$mask" >&2
 		    case "$mask"
 		    in
@@ -77,24 +111,49 @@ _getnetworkaddr()
 _usage()
 {
     echo "Usage: $0 [options]"
-    echo "  -f  force, don't try to guess the version of Python, Qt, ..."
-    echo "  -p  generate list of likely packages that should be"
-    echo "      installed with dnf or apt-get or yum or ..."
-    echo "  -v  verbose (debugging)"
+    echo "  -f           force, don't try to guess the version of Python, Qt, ..."
+    echo "  -m manifest  use alternative manifest file"
+    echo "  -o otherdir  use alternative other-packages directory"
+    echo "  -p           generate list of likely packages that should be"
+    echo "               installed with dnf or apt-get or yum or ..."
+    echo "  -P           same as -p, but emit shell commands for installer"
+    echo "  -r require   use alternative require file"
+    echo "  -s skip      use alternative skip file"
+    echo "  -S skipbase  use alternative basename for skipbase.<hostname> files"
+    echo "  -u unavail   use alternative unavailable file"
+    echo "  -v           verbose (debugging)"
     exit 1
 }
 
+# Need directory where check-vm script is located so we can find
+# the default other-packages/manifest and other-packages/unavailable
+# files and the whatami script
+#
+home=`echo $0 | sed -e 's/\/*check-vm$//'`
+if [ -z "$home" -o ! -d "$home" ]
+then
+    echo "Botch: \$0=$0 -> bad \$home=$home ?"
+    exit 1
+fi
+
 force=false
 pkglist=false
+pkgcmd=false
 verbose=false
 very_verbose=false
 check_manifest=false
-check_mainfest_args=''
-while getopts 'cfpv?' p
+check_manifest_args=''
+manifest="$home"/other-packages/manifest		# default, see -m
+otherdir=other-packages					# default, see -o
+require="$home"/other-packages/require			# default, see -r
+skip="$home"/other-packages/skip			# default, see -s
+skipbase="$home"/other-packages/skip			# default, see -S
+unavailable="$home"/other-packages/unavailable		# default, see -u
+while getopts 'cfm:o:pPr:s:S:u:v?' p
 do
     case "$p"
     in
-	c)	# exec check-mainfest when manifest has been build
+	c)	# exec check-manifest when manifest has been build
 		# ... expert only, so not even mentioned in Usage
 		#
 		check_manifest=true
@@ -104,18 +163,46 @@ do
 		force=true
 		;;
 
+	m)	# alternate manifest
+		manifest="$OPTARG"
+		;;
+
+	o)	# alternate other-packages directory
+		otherdir="$OPTARG"
+		;;
+
 	p)	# just list most likely package for yum, dnf, apt-get, ...
 		pkglist=true
+		;;
+
+	P)	# same as -P but emit shell commands for installer
+		pkgcmd=true
+		pkglist=true
+		;;
+
+	r)	# alternate require
+		require="$OPTARG"
+		;;
+
+	s)	# alternate skip
+		skip="$OPTARG"
+		;;
+
+	S)	# alternate skip basename
+		skipbase="$OPTARG"
+		;;
+
+	u)	# alternate unavailable
+		unavailable="$OPTARG"
 		;;
 
 	v)	if $verbose
 		then
 		    very_verbose=true
-		    check_manifest_args="-vv"
 		else
 		    verbose=true
-		    check_manifest_args="-v"
 		fi
+		check_manifest_args="$check_manifest_args -v"
 		;;
 
 	?)	_usage
@@ -125,14 +212,14 @@ done
 shift `expr $OPTIND - 1`
 [ $# -eq 0 ] || _usage
 
-if $verbose
+if $very_verbose
 then
     tmp=tmp
-    rm -f $tmp.*
 else
     tmp=/var/tmp/$$
     trap "rm -f $tmp.*; exit 0" 0 1 2 3 15
 fi
+rm -f $tmp.*
 
 if [ -f /etc/pcp.conf ]
 then
@@ -198,6 +285,147 @@ NR == 2	{ nf = NF
     return $ret
 }
 
+# The require, unavailable and skip files have the same format,
+# listing packages and package patterns that apply to a particular
+# distribution, version and architecture.
+#
+# This function parses one of these files (specified as $1) and the
+# selected packages (if any) are written on std output
+#
+_parse_file()
+{
+    $PCP_AWK_PROG '{ for (i = 3; i <= NF; i++) printf $i " "; print "" }' <$tmp.whatami \
+    | sed \
+	-e 's/ \[.*//' \
+	-e 's/ ([^)]*)//' \
+	-e 's/RHEL Server/RHEL/' \
+	-e 's/Arch Linux/ArchLinux /' \
+	-e '/CentOS/{
+s/CentOS Linux/CentOS/
+s/CentOS\([0-9]\)/CentOS \1/
+}' \
+	-e '/FreeBSD/s/-RELEASE//' \
+	-e '/SLES\([0-9][0-9]*\) SP/s//\1-SP/' \
+	-e '/OpenIndiana/s/Hipster //' \
+	-e 's/^/_arch=/' \
+	-e 's/ /+_distro=/' \
+	-e 's/ / _version="/' \
+	-e 's/+_/ _/' \
+	-e 's/$/"/' \
+    | tr ' ' '\012' >$tmp.eval
+    $very_verbose && echo >&2 "_parse_file($1): vars: `tr '\012' ' ' <$tmp.eval`"
+    eval `cat $tmp.eval`
+    rm -f $tmp.matches
+    sed <$1 \
+	-e 's/#.*//' \
+	-e '/^[ 	]*$/d' \
+    | while read distro_pat version_pat arch_pat packages
+    do
+	if echo "$_distro" | grep "$distro_pat" >/dev/null
+	then
+	    # Distro matches, check versions
+	    #
+	    _match=true
+	    if [ "X$version_pat" = "X-" -o -z "$_version" ]
+	    then
+		:
+	    else
+		if echo "$_version" | grep "$version_pat" >/dev/null
+		then
+		    :
+		else
+		    _match=false
+		fi
+	    fi
+	    if $_match
+	    then
+		# Distro and version matches, check architecture
+		if [ "X$arch_pat" = "X-" -o -z "$_arch" ]
+		then
+		    :
+		else
+		    if echo "$_arch" | grep "$arch_pat" >/dev/null
+		    then
+			:
+		    else
+			_match=false
+		    fi
+		fi
+	    fi
+	    if $_match
+	    then
+		echo "$packages" >>$tmp.matches
+	    fi
+	fi
+    done
+    if [ -s $tmp.matches ]
+    then
+	tr '\012' ' ' <$tmp.matches
+    else
+	$very_verbose && echo >&2 "_parse_file: $1: no matches"
+    fi
+}
+
+_find_installer_cmd()
+{
+    installcmd=''
+    case "`sed <$tmp.whatami -e 's/  */ /g' -e 's/ \[.*//' | cut -d ' ' -f 4-`"
+    in
+	*Ubuntu*|*Debian*|*LinuxMint*)
+	    installcmd="apt install"
+	    ;;
+	*RHEL*|*Fedora*|*CentOS*|*openSUSE*|*SUSE\ SLES*)
+	    if which zypper >/dev/null 2>&1
+	    then
+		installcmd="zypper install"
+	    elif which dnf >/dev/null 2>&1
+	    then
+		installcmd="dnf install"
+	    elif which yum >/dev/null 2>&1
+	    then
+		installcmd="yum install"
+	    fi
+	    ;;
+
+	*NetBSD*)
+	    installcmd="pkgin -y install"
+	    ;;
+
+	*FreeBSD*)
+	    installcmd="pkg install"
+	    ;;
+
+	*OpenBSD*)
+	    installcmd="pkg_add"
+	    ;;
+
+	*Gentoo*)
+	    installcmd="emerge --ask"
+	    ;;
+
+	*Darwin*)
+	    installcmd="brew install"
+	    ;;
+
+	*OpenIndiana*)
+	    installcmd="pkg install"
+	    ;;
+
+	*Slackware*)
+	    installcmd="slackpkg install"
+	    ;;
+
+	*Arch\ Linux*)
+	    installcmd="pacman -S"
+	    ;;
+    esac
+    if [ -z "$installcmd" ]
+    then
+	echo "$0: Botch: don't recognize installcmd for: `cat $tmp.whatami`"
+	exit
+    fi
+}
+
 # add additional and optional directories
 for dir in /sbin /usr/sbin
 do
@@ -213,7 +441,7 @@ do
     fi
 done
 
-# Packaging tools we know about.
+# Packaging types we know about.
 #	dpkg - Debian-based
 #	rpm - RPM-based, e.g. RHEL, CentOS, SuSE, Fedora
 #	urpmi - OpenMandriva (also RPM based)
@@ -224,8 +452,9 @@ done
 #	S_pkg - pkg(1) on OpenIndiana
 #	slackpkg - Slackware
 #	pacman - Arch Linux
+#	brew - Mac OS X
 #
-pkgtools="dpkg rpm urpmi emerge pkgin pkg_add F_pkg S_pkg slackpkg pacman"
+pkgtypes="dpkg rpm urpmi emerge pkgin pkg_add F_pkg S_pkg slackpkg pacman brew"
 
 # Distros we know about (or more specifically ones with the same 
 # packaging tools but different package names).
@@ -236,37 +465,42 @@ pkgtools="dpkg rpm urpmi emerge pkgin pkg_add F_pkg S_pkg slackpkg pacman"
 #	suse		SLES or OpenSuSE
 #	arch		Arch Linux
 #	mandriva	OpenMandriva
+#	freebsd		FreeBSD
+#	netbsd		NetBSD
+#	openbsd		OpenBSD
 #
-distros="debian redhat centos suse arch mandriva"
+distros="debian redhat centos suse arch mandriva freebsd netbsd openbsd"
 
-# Need directory where check-vm script is located so we can find
-# the package.manifest file and the whatami script
+if [ ! -f "$manifest" ]
+then
+    echo "Botch: cannot find manifest: $manifest"
+    exit 1
+fi
+if [ ! -f "$require" ]
+then
+    echo "Botch: cannot find require: $require"
+    exit 1
+fi
+if [ ! -f "$unavailable" ]
+then
+    echo "Botch: cannot find unavailable: $unavailable"
+    exit 1
+fi
+if [ ! -f "$skip" ]
+then
+    echo "Botch: cannot find skip: $skip"
+    exit 1
+fi
+if [ ! -f "$home"/whatami ]
+then
+    echo "Botch: cannot find whatami :$home/whatami"
+    exit 1
+fi
+$home/whatami >$tmp.whatami
+
+# append original line numbers for non-blank lines
 #
-dir=`echo $0 | sed -e 's/\/*check-vm$//'`
-if [ -z "$dir" -o ! -d "$dir" ]
-then
-    echo "Botch: \$0=$0 -> bad \$dir=$dir ?"
-    exit 1
-fi
-if [ ! -f "$dir"/package.manifest ]
-then
-    echo "Botch: cannot find $dir/package.manifest"
-    exit 1
-fi
-if [ ! -f "$dir"/whatami ]
-then
-    echo "Botch: cannot find $dir/whatami"
-    exit 1
-fi
-
-if $check_manifest
-then
-    # append original line numbers
-    #
-    $PCP_AWK_PROG '{ print $0 " :" NR }' <$dir/package.manifest >$tmp.manifest
-else
-    cat <$dir/package.manifest >$tmp.manifest
-fi
+$PCP_AWK_PROG 'NF > 0 { print $0 " :" NR }' <$manifest >$tmp.manifest
 
 if which python >/dev/null 2>&1
 then
@@ -303,10 +537,10 @@ then
 	# FreeBSD is the only one to have jail(8) in the help text
 	#
 	have_F_pkg=true
-	$verbose && echo "F_pkg -> pkg for FreeBSD"
+	$verbose && echo >&2 "F_pkg -> pkg for FreeBSD"
     else
 	have_S_pkg=true
-	$verbose && echo "S_pkg -> pkg for OpenIndiana"
+	$verbose && echo >&2 "S_pkg -> pkg for OpenIndiana"
     fi
 fi
 
@@ -314,10 +548,10 @@ fi
 # this is an optimization remove checks from the main loop below
 #
 rm -f $tmp.ok
-for pkgtype in $pkgtools
+for pkgtype in $pkgtypes
 do
     want=true
-    pkgtool=$pkgtype
+    tool=$pkgtype
     case $pkgtype
     in
 	rpm)
@@ -335,23 +569,82 @@ do
 	    which pkgin >/dev/null 2>&1 && want=false
 	    ;;
 	S_pkg)
-	    $have_S_pkg || want=false
-	    pkgtool=pkg
+	    if $have_S_pkg
+	    then
+		tool=pkg
+	    else
+		want=false
+	    fi
 	    ;;
 	F_pkg)
-	    pkgtool=pkg
-	    $have_F_pkg || want=false
+	    if $have_F_pkg
+	    then
+		tool=pkg
+	    else
+		want=false
+	    fi
 	    ;;
     esac
 
-    if which $pkgtool >/dev/null 2>&1 && $want
+    if which $tool >/dev/null 2>&1 && $want
     then
-	$very_verbose && echo "include ${pkgtype}? lines"
+	$very_verbose && echo >&2 "include ${pkgtype}? lines"
 	sed -e "s/^${pkgtype}?[ 	]//" <$tmp.manifest >$tmp.tmp
 	mv $tmp.tmp $tmp.manifest
 	touch $tmp.ok
+	# one-trip list all currently installed packages for -p
+	#
+	if [ ! -f $tmp.installed ]
+	then
+	    case "$pkgtype"
+	    in
+		dpkg)
+		    dpkg-query -W -f '${package}\n'
+		    ;;
+
+		rpm)
+		    rpm -qa --qf '%{NAME}\n'
+		    ;;
+
+		pkgin)
+		    pkgin list | sed -e 's/-[0-9].*//'
+		    ;;
+
+		F_pkg)
+		    pkg info -a | sed -e 's/-[0-9].*//'
+		    ;;
+
+		S_pkg)
+		    pkg list -H | sed -e 's/ .*//'
+		    ;;
+
+		pkg_add)
+		    pkg_info -a | sed -e 's/-[0-9].*//'
+		    ;;
+
+		emerge)
+		    equery list '*' | sed -e 's/.*].*] //' -e 's/-[0-9].*//'
+		    ;;
+
+		slackpkg)
+		    ls /var/log/packages | sed -e 's/-[0-9].*//'
+		    ;;
+
+		pacman)
+		    pacman -Q -i | sed -n -e '/^Name /s/.* : //p'
+		    ;;
+
+		brew)
+		    echo >&2 "TODO: no list all packages method for brew"
+		    ;;
+
+		*)
+		    echo >&2 "Botch: no list all packages method for $pkgtype"
+		    ;;
+	    esac >$tmp.installed
+	fi
     else
-	$very_verbose && echo "exclude ${pkgtype}? lines"
+	$very_verbose && echo >&2 "exclude ${pkgtype}? lines"
 	grep -v "^${pkgtype}?[ 	]" <$tmp.manifest >$tmp.tmp
 	mv $tmp.tmp $tmp.manifest
     fi
@@ -359,26 +652,57 @@ done
 if [ ! -f $tmp.ok ]
 then
     echo "Warning: don't understand what packing is being used here ..."
-    echo "         it is none of: $pkgtools"
+    echo "         it is none of: $pkgtypes"
 fi
 
 # Strip the distro-dependent lines that do not apply ...
 # this is an optimization remove checks from the main loop below
 #
-# tests here are copied from $(TOPDIR)/configure.ac
-#
-[ -f /etc/SuSE-release ] && iam=suse
-[ -f /etc/fedora-release ] && iam=fedora
-if [ -f /etc/redhat-release ]
+
+if [ -n "$PCP_PLATFORM" ]
 then
-    iam=redhat
-    [ -f /etc/centos-release ] && iam=centos
+    iam="$PCP_PLATFORM"
+else
+    # tests here are copied from whatami
+    #
+    if [ -f /etc/SuSE-release ]
+    then
+	iam=suse
+    elif [ -f /etc/centos-release ]
+    then
+	iam=centos
+    elif [ -f /etc/redhat-release ]
+    then
+	iam=redhat
+    elif [ -f /etc/debian_version ]
+    then
+	iam=debian
+    elif [ -f /etc/mandriva-release ]
+    then
+	iam=mandriva
+    elif [ -f /etc/gentoo-release ]
+    then
+	iam=gentoo
+    elif [ -f /etc/fedora-release ]
+    then
+	iam=fedora
+    elif [ -f /etc/os-release ]
+    then
+	iam=opensuse
+    elif [ -f /etc/release ]
+    then
+	iam=openindiana
+    elif [ -f /etc/slackware-version ]
+    then
+	iam=slackware
+    elif [ -f /etc/arch-release ]
+    then
+	iam=arch
+    elif [ -f /etc/lsb-release ]
+    then
+	iam=`sed </etc/lsb-release -n -e '/^DISTRIB_ID *= */s///p' | tr '[A-Z]' '[a-z]'`
+    fi
 fi
-[ -f /etc/debian_version ] && iam=debian
-[ -f /etc/slackware-version ] && iam=slackware
-[ -f /etc/gentoo-release ] && iam=gentoo
-[ -f /etc/mandriva-release ] && iam=mandriva
-[ -f /etc/arch-release ] && iam=arch
 
 for distro in $distros
 do
@@ -394,158 +718,135 @@ do
     esac
     if $pick
     then
-	$very_verbose && echo "include ${distro}? lines"
+	$very_verbose && echo >&2 "include ${distro}? lines"
 	sed -e "s/^${distro}?[ 	]//" <$tmp.manifest >$tmp.tmp
 	mv $tmp.tmp $tmp.manifest
     else
-	$very_verbose && echo "exclude ${distro}? lines"
+	$very_verbose && echo >&2 "exclude ${distro}? lines"
 	grep -v "^${distro}?[ 	]" <$tmp.manifest >$tmp.tmp
 	mv $tmp.tmp $tmp.manifest
     fi
 done
 
-# Modify the package inventory for some particular hosts where we've
-# explored and _know_ certain packages are not available
+# the "unavailable" file records packages that are not available for a
+# particular distribution and version and archtecture ... 
 #
-na=''
-case `hostname -s`
-in
-    bozo)
-	# not so much unavailable as unsafe to install on hypervisor
-	# and nameserver
-	#
-	na='docker.io unbound libsoqt5-dev'
-	;;
-    bozo-laptop)
-	na='python3-bcc'
-	;;
-    bozo-vm)
-	na='docker.io python3-bpfcc libsoqt5-dev python-elasticsearch python-openpyxl python-psycopg2'
-	;;
-    vm00)
-	na='libuv1-dev python3-libvirt python3-prometheus-client python3-elasticsearch python3-openpyxl python3-bpfcc libsoqt5-dev python-prometheus-client python-elasticsearch python-openpyxl python-psycopg2'
-	;;
-    vm01)
-	na='python3-bpfcc libsoqt5-dev'
-	;;
-    vm02)
-	na='libvarlink-devel python-prometheus_client python3-prometheus_client zabbix-agent kubernetes-node qtchooser selinux-policy-devel selinux-policy-targeted'
-	;;
-    vm03)
-	na='libvarlink-devel python3-prometheus_client'
-	;;
-    vm04)
-	na='libvarlink-devel python-prometheus_client python-openpyxl qtchooser'
-	;;
-    vm05)
-	na=''
-	;;
-    vm06)
-	na='sensors'
-	;;
-    vm07)
-	na='python3-bpfcc libsoqt5-dev docker.io'
-	;;
-    vm08)
-	na='libvarlink-devel python-prometheus_client python-openpyxl qtchooser'
-	;;
-    vm09)
-	na='avahi sysstat valgrind py36-bcc py36-libvirt realpath libibumad libibmad python3-jsonpointer p5-DBD-mysql zabbix-agent py36-prometheus-client mkfs.gfs2 docker qtchooser qt5 uic QtSvg dtrace boost json_reformat py36-imaging nmap' 
-	;;
-    vm10)
-	na='sensors'
-	;;
-    vm11)
-	na='python3-bpfcc docker.io libsoqt5-dev'
-	;;
-    vm12)
-	na='libvarlink-devel python3-prometheus_client python3-bcc kubernetes-client kubernetes-node'
-	;;
-    vm13)
-	na=''
-	;;
-    vm14)
-	na='libvarlink-devel systemd-devel libpfm-devel python-prometheus_client python-elasticsearch python-openpyxl socat zabbix-agent docker-io qtchooser qt5-qtbase-devel uic qt5-qtsvg-devel SoQt-devel Coin-devel Net::SNMP YAML::XS::LibYAML libuv-devel kubernetes-client kubernetes-node docker-common'
-	;;
-    vm15)
-    	na='valgrind socat'
-    	;;
-    vm18)
-	na='python3-libvirt python3-prometheus-client python3-elasticsearch python-prometheus-client python-elasticsearch libsoqt5-dev'
-	;;
-    vm19)
-	na='libvarlink-devel python3-jsonpointer python3-rtslib libvirt-python3 python-prometheus_client python3-elasticsearch zabbix-agent docker-io qtchooser python3-pillow python3-bcc python3-prometheus_client'
-	;;
-    vm20)
-	na='sysv-rc-conf'
-	;;
-    vm21)
-	na='python3-bpfcc docker.io libsoqt5-dev'
-	;;
-    vm22)
-	na=''
-	;;
-    vm23)
-	na='python3-bcc kubernetes-client kubernetes-node 389-ds-base'
-	;;
-    vm24)
-	na='libvarlink-devel selinux-policy-targeted selinux-policy-devel SoQt-devel Coin-devel zabbix-agent qtchooser python3-jsonpointer python3-rtslib libvirt-python3 python3-prometheus_client python3-elasticsearch python3-bcc python3-pillow docker-io python3-prometheus_client python-prometheus_client python-elasticsearch'
-	;;
-    vm25)
-	na='libvarlink-devel python3-jsonpointer python3-rtslib libvirt-python3 python3-lxml python-prometheus_client python3-prometheus_client python3-elasticsearch python-openpyxl python3-openpyxl python3-bcc python3-pillow python3-psycopg2 qtchooser python3-requests'
-    	;;
-    vm26)
-	na='libvarlink-devel python3-prometheus_client'
-	;;
-    vm27)
-	na='libsoqt5-dev python3-bpfcc'
-	;;
-    vm28)
-	na='device-mapper-devel libvarlink-devel systemd-devel libpfm-devel python-prometheus_client python-openpyxl kubernetes-client kubernetes-node realpath libicu-devel qtchooser Coin-devel realpath'
-	;;
-    vm29)
-	na='device-mapper-devel libvarlink-devel python-prometheus_client python-elasticsearch perl-YAML-LibYAML perl-Net-SNMP zabbix-agent qtchooser qtchooser SoQt-devel Coin-devel SoQt-devel python-openpyxl libuv-devel'
-    	;;
-    vm30)
-	na='libvarlink-devel libuv-devel python3-six python3-jsonpointer python3-rtslib libvirt-python3 python3-lxml python-prometheus_client python3-prometheus_client python-elasticsearch python3-elasticsearch python-openpyxl python3-openpyxl python3-bcc python3-pillow kubernetes-client kubernetes-node python3-requests 389-ds-base memcached zabbix-agent gfs2-utils qtchooser qt5-qtbase-devel qt5-qtsvg-devel SoQt-devel Coin-devel SoQt-devel python3-libs yajl python-psycopg2 python3-psycopg2'
-	;;
-    vm31)
-	na='python-prometheus_client' 
-	;;
-    vm32)
-	na='libibumad libibmad sensors'
-	;;
-    vm33)
-	na=''
-	;;
-    vm34)
-	na='umad libpapi libpfm gfs2 python-prometheus-client python2-prometheus-client python2-openpyxl dtrace boost'
-	;;
-    vm35)
-	na=''
-	;;
-    vm36)
-	na='python3-bpfcc libsoqt5-dev'
-    	;;
-    vm37)
-	# qtbase is Qt5 and gcc++ is too old to compile Qt5 headers ... revist
-	# if we change from gcc to clang here
-	# qtsvg is not needed without Qt5
-	# valgrind is available, but segv's
-	#
-	na='libibumad py36-jsonpointer libvirt-python3 realpath py3-prometheus-client py3-openpyxl py3-bcc qtchooser qtbase qtsvg valgrind'
-	;;
-esac
-if [ -n "$na" ]
+_parse_file $unavailable >$tmp.pkgs
+if [ -s $tmp.pkgs ]
 then
-    for f in $na
+    unavail_pkg="`cat $tmp.pkgs`"
+fi
+$very_verbose && echo >&2 "unavailable: $unavail_pkg"
+
+# the "require" file records packages that are must be installed for a
+# particular distribution and version and archtecture ... 
+#
+require_pkg=''
+_parse_file $require >$tmp.pkgs
+if [ -s $tmp.pkgs ]
+then
+    $very_verbose && echo >&2 "require: `cat $tmp.pkgs`"
+    for _need in `cat $tmp.pkgs`
     do
-# s;[^ 	]*\('"$f"'\);\1;
-	sed <$tmp.manifest >$tmp.tmp -e "/$f/{"'
-s;\[[^]]*];[N/A on host '"`hostname -s`"'];
+	if grep "^$_need\$" $tmp.installed >/dev/null
+	then
+	    :
+	else
+	    if [ -z "$require_pkg" ]
+	    then
+		require_pkg="$_need"
+	    else
+		require_pkg="$require_pkg $_need"
+	    fi
+	fi
+    done
+    if $very_verbose
+    then
+	if [ -n "$require_pkg" ]
+	then
+	    echo >&2 "require and not installed: $require_pkg"
+	else
+	    echo >&2 "require and not installed: <none>"
+	fi
+    fi
+fi
+
+if $pkglist
+then
+    # for -p, don't mark manifest lines with N/A ... this is handled
+    # later for each package in [ ... ]
+    #
+    :
+else
+    if [ -n "$unavail_pkg" ]
+    then
+	for _pkg in $unavail_pkg
+	do
+	    if [ -z "$_version" ]
+	    then
+		sed <$tmp.manifest >$tmp.tmp -e "/[[ ]$_pkg[] ]/"'{
+s/\([[ ]\)'"$_pkg"'\([] ]\)/\1 \2/
+s/\(\[.*\) or/\1/g
+s/\(\[.*\) ([^)]*)/\1/g
+s/  */ /g
+s;\[  *\([](]\);[N/A on '"$_distro"' \1;
+s/  *]/]/
+}'
+	    else
+		sed <$tmp.manifest >$tmp.tmp -e "/[[ ]$_pkg[] ]/"'{
+s/\([[ ]\)'"$_pkg"'\([] ]\)/\1 \2/
+s/  */ /g
+s;\[  *\([](]\);[N/A on '"$_distro"' '"$_version"' \1;
+s/  *]/]/
+}'
+	    fi
+	    mv $tmp.tmp $tmp.manifest
+	    $very_verbose && echo >&2 "unavailable: $_pkg"
+	done
+    fi
+fi
+
+# the optional "skip.<hostname>" file records packages that may be available
+# but for various reasons should be be installed on a particular host ...
+# examples are docker.io that does not get along with qemu or unbound that
+# does not co-exist with bind9 or libfooqt.so that is really for the wrong
+# version of Qt
+#
+skip_pkg=''
+_hostname=`hostname -s`
+if [ -f $skipbase.$_hostname ]
+then
+    $verbose && echo >&2 "Processing $skipbase.`hostname -s` ..."
+    skip_pkg=`sed <$skipbase.$_hostname \
+	    -e 's/#.*//' \
+	    -e '/^[ 	]*$/d' | tr '\012' ' '`
+    if [ -n "$skip_pkg" ]
+    then
+	$very_verbose && echo >&2 "skip on host: $skip_pkg"
+	for _pkg in $skip_pkg
+	do
+	    sed <$tmp.manifest >$tmp.tmp -e "/[[ ]$_pkg[] ]/"'{
+s;\[[^]]*];[SKIP on host '"$_hostname"'];
+}'
+	    mv $tmp.tmp $tmp.manifest
+	done
+    fi
+fi
+
+# the "skip" file records packages that should not be installed for a
+# particular distribution and version and archtecture ... 
+#
+_parse_file $skip >$tmp.pkgs
+if [ -s $tmp.pkgs ]
+then
+    $very_verbose && echo >&2 "skip: `cat $tmp.pkgs`"
+    skip_pkg="$skip_pkg `cat $tmp.pkgs`"
+    for _pkg in `cat $tmp.pkgs`
+    do
+	sed <$tmp.manifest >$tmp.tmp -e "/[[ ]$_pkg[] ]/"'{
+s;\[[^]]*];[SKIP];
 }'
 	mv $tmp.tmp $tmp.manifest
-	$very_verbose && echo "n/a for $f"
     done
 fi
 
@@ -567,8 +868,8 @@ else
 	    else
 		#debug# echo "pyver=$pyver"
 		sed <$tmp.manifest >$tmp.tmp -e '/\/python[0-9]/{
-    /\/python'"$pyver"'[./]/!d
-    }'
+/\/python'"$pyver"'[./]/!d
+}'
 		#debug# diff $tmp.manifest $tmp.tmp
 		mv $tmp.tmp $tmp.manifest
 	    fi
@@ -602,16 +903,25 @@ fi
 
 if $check_manifest
 then
-    echo "Handing off to $dir/check-manifest ..."
-    exec $dir/check-manifest $check_manifest_args $tmp
+    # save the unavailable packages list, and hand off
+    #
+    touch $tmp.unavail
+    for _pkg in $unavail_pkg
+    do
+	echo "$_pkg" >>$tmp.unavail
+    done
+    echo "Handing off to $home/check-manifest ..."
+    exec $home/check-manifest $check_manifest_args $tmp
 fi
 
 # main loop
 #
 cat $tmp.manifest \
 | sed -e 's/#.*//' -e '/^[ 	]*$/d' \
-| while read apps
+| while read line
 do
+    apps=`echo "$line" | sed -e 's/:[0-9][0-9]*$//' -e 's/ $//'`
+    lineno=`echo "$line" | sed -e 's/.* :\([0-9][0-9]*\)$/\\1/'`
     rm -f $tmp.ok
     rm -f $tmp.echo
     for app in $apps
@@ -694,13 +1004,13 @@ do
 	fi
 	if $verbose
 	then
-	    echo -n "$app ... "
-	    $optional && echo -n "[optional] "
+	    $PCP_ECHO_PROG >&2 $PCP_ECHO_N "$app ... "$PCP_ECHO_C
+	    $optional && $PCP_ECHO_PROG >&2 $PCP_ECHO_N "[optional] "$PCP_ECHO_C
 	    if [ $ok = 0 ]
 	    then
-		echo -n "yes "
+		$PCP_ECHO_PROG >&2 $PCP_ECHO_N "yes "$PCP_ECHO_C
 	    else
-		echo -n "no "
+		$PCP_ECHO_PROG >&2 $PCP_ECHO_N "no "$PCP_ECHO_C
 	    fi
 	    touch $tmp.echo
 	fi
@@ -708,7 +1018,11 @@ do
 	then
 	    if $optional
 	    then
-		[ -f $tmp.echo ] && echo
+		if [ -f $tmp.echo ]
+		then
+		    echo >&2
+		    rm -f $tmp.echo
+		fi
 		continue
 	    fi
 	    touch $tmp.ok
@@ -722,35 +1036,82 @@ do
 	    fi
 	fi
     done
-    [ -f $tmp.echo ] && echo
     if [ ! -f $tmp.ok ]
     then
 	if $pkglist
 	then
 	    echo "$apps" \
 	    | sed -n \
-		-e '/^N\/A/d' \
-		-e '/ N\/A/d' \
-		-e '/\[N\/A/d' \
-		-e 's/QA optional//' \
-		-e 's/from cpan//' \
-		-e 's/cpan//' \
-		-e 's/[A-Za-z][A-Za-z_]*::[A-Za-z][A-Za-z_]*//' \
-		-e 's/[A-Za-z][A-Za-z_]*:://' \
-		-e 's/[ 	]*\[[ 	()]*]//' \
-		-e '/[ 	]\[/{
-s/^.*[ 	]\[//
-s/]//
-s/[ 	].*//
-p
-n
-}' \
-		-e 's/  */ /g' \
+		-e '/\[SKIP on host/s/on host.*/]/' \
+		-e 's/.*\[//' \
+		-e 's/]//' \
+		-e 's/ ([^)]*)//' \
+		-e 's/base [^ ]* install//' \
+		-e 's/^or //' \
+		-e 's/ or$//' \
+		-e 's/^or$//' \
+		-e 's/ or / /g' \
+		-e 's/[ 	][ 	]*/ /g' \
+		-e '/^ *$/d' \
 		-e p \
-	    | sed -e '/^ *$/d'
-
+	    | while read _missing
+	    do
+		# don't list the unavailable packages nor the skipped ones
+		# nor the ones already installed
+		#
+		for _need in $_missing
+		do
+		    if [ "$_need" = "N/A" ]
+		    then
+			if $verbose
+			then
+			    $PCP_ECHO_PROG >&2 $PCP_ECHO_N "[unavailable] "$PCP_ECHO_C
+			    touch $tmp.echo
+			fi
+			continue
+		    fi
+		    if [ "$_need" = "SKIP" ]
+		    then
+			if $verbose
+			then
+			    $PCP_ECHO_PROG >&2 $PCP_ECHO_N "[skip] "$PCP_ECHO_C
+			    touch $tmp.echo
+			fi
+			continue
+		    fi
+		    if grep "^$_need\$" $tmp.installed >/dev/null
+		    then
+			[ -f $tmp.echo ] && echo >&2
+			echo >&2 "Warning: manifest:$lineno botch? target: \"`echo "$apps" | sed -e 's/[ 	].*//'`\" not found, but package \"$_need\" already installed"
+			rm -f $tmp.echo
+		    else
+			rm -f $tmp.match
+			for _pkg in $unavail_pkg
+			do
+			    if echo " $_need " | grep " $_pkg " >/dev/null
+			    then
+				if $verbose
+				then
+				    $PCP_ECHO_PROG >&2 $PCP_ECHO_N "[unavailable] "$PCP_ECHO_C
+				    touch $tmp.echo
+				fi
+				touch $tmp.match
+				break
+			    fi
+			done
+			if [ ! -f $tmp.match ]
+			then
+			    echo "$_need"
+			fi
+		    fi
+		done
+	    done
+	elif echo "$apps" | grep '\[SKIP' >/dev/null
+	then
+	    # nothing to report
+	    :
 	else
-	    echo "Missing: `echo $apps \
+	    echo "Missing: `echo "$apps" \
 		| sed \
 		    -e 's/[ 	][ 	]*/ /g' \
 		    -e '/ /{
@@ -764,21 +1125,77 @@ t loop2
 s/@/ /g
 }'`"
 	fi
+    else
+	if echo "$apps" | grep 'N/A' >/dev/null
+	then
+	    [ -f $tmp.echo ] && echo >&2
+	    echo >&2 "Warning: manifest:$lineno botch? target: \"`echo "$apps" | sed -e 's/[ 	].*//'`\" found, but marked N/A"
+	    rm -f $tmp.echo
+	fi
     fi
+    [ -f $tmp.echo ] && echo >&2
+
 done >$tmp.out
+
+
+if $pkglist
+then
+    # append required packages ... uniq below culls any duplicates
+    for _pkg in $require_pkg
+    do
+	echo "$_pkg" >>$tmp.out
+    done
+fi
 
 if [ -s $tmp.out ]
 then
     if $pkglist
     then
-	tr '[\012]' ' ' <$tmp.out | sed -e 's/  */ /g' -e 's/^ //' -e 's/ $//'
-	echo
+	sort <$tmp.out \
+	| uniq >$tmp.tmp
+	if $pkgcmd
+	then
+	    _find_installer_cmd
+	    grep -v 'cpan(' <$tmp.tmp | grep -v 'pip3(' >$tmp.pkg
+	    if [ -s $tmp.pkg ]
+	    then
+		echo "sudo $installcmd `tr '\012' ' ' <$tmp.pkg`"
+	    fi
+	    grep 'cpan(' <$tmp.tmp >$tmp.pkg
+	    if [ -s $tmp.pkg ]
+	    then
+		sed <$tmp.pkg \
+		    -e 's/^/sudo cpan /' \
+		    -e 's/cpan(/"/' \
+		    -e 's/)/"/'
+		# end
+	    fi
+	    grep 'pip3(' <$tmp.tmp >$tmp.pkg
+	    if [ -s $tmp.pkg ]
+	    then
+		echo "sudo pip3 install `tr '\012' ' ' <$tmp.pkg`"
+	    fi
+	else
+	    tr '\012' ' ' <$tmp.tmp \
+	    | sed -e 's/  */ /g' -e 's/^ //' -e 's/ $//'
+	    # BSD* and Darwin heuristic hack ... don't need extra echo for
+	    # these guys
+	    #
+	    [ -z "$PCP_ECHO_N" ] || echo
+	fi
     else
 	cat $tmp.out
     fi
 fi
 
 $pkglist && exit
+
+# Any required packages not installed?
+#
+for _pkg in $require_pkg
+do
+    echo "Missing: $_pkg [required package not installed]"
+done
 
 # Some platform-specific and special case tests
 #
@@ -831,7 +1248,7 @@ End-of-File
 	    ( echo $version; echo $ctlversion ) | _compare $relop
 	    if [ $? = 0 ]
 	    then
-		$verbose && echo "$pkg: version installed $version, need $relop $ctlversion, OK"
+		$verbose && echo >&2 "$pkg: version installed $version, need $relop $ctlversion, OK"
 	    else
 		echo "Warning: $pkg version installed $version, need $relop $ctlversion"
 	    fi
@@ -873,7 +1290,7 @@ End-of-File
 	    rpm -q $rpm >$tmp.tmp 2>/dev/null
 	    if grep 'is not installed' $tmp.tmp >/dev/null 2>&1
 	    then
-		$verbose && echo "$rpm: not installed, need $relop $specversion$pcp_pkg, OK"
+		$verbose && echo >&2 "$rpm: not installed, need $relop $specversion$pcp_pkg, OK"
 		echo "Warning: $rpm not installed, need $relop $specversion$pcp_pkg" >>$tmp.notfound
 	    else
 		touch $tmp.found
@@ -881,7 +1298,7 @@ End-of-File
 		( echo $version; echo $specversion ) | _compare $relop
 		if [ $? = 0 ]
 		then
-		    $verbose && echo "$rpm: version installed $version, need $relop $specversion$pcp_pkg, OK"
+		    $verbose && echo >&2 "$rpm: version installed $version, need $relop $specversion$pcp_pkg, OK"
 		else
 		    echo "Warning: $rpm version installed $version, need $relop $specversion$pcp_pkg"
 		fi
@@ -891,7 +1308,7 @@ End-of-File
 	then
 	    :
 	else
-	    $verbose || cat $tmp.notfound
+	    $verbose || cat >&2 $tmp.notfound
 	fi
     done
 fi
@@ -922,7 +1339,7 @@ End-of-File
 	    ( echo $libversion; echo $version ) | _compare $relop
 	    if [ $? = 0 ]
 	    then
-		$verbose && echo "$lib: version installed $libversion, need $relop $version$pcp_pkg, OK"
+		$verbose && echo >&2 "$lib: version installed $libversion, need $relop $version$pcp_pkg, OK"
 	    else
 		echo "Warning: $lib version installed $libversion, need $relop $version$pcp_pkg"
 	    fi
@@ -981,7 +1398,7 @@ p
 	-e '/ inet /s/\/.*/ /' \
     | awk '
 /^[^ 	]/	{ iface = $1; next }
-/inet addr:'$ipaddr' / || /inet '$ipaddr' / {
+/inet addr:'$ipaddr' / || /inet '$ipaddr'[ \/]/ {
 			  if (iface == "lo")
 			    print "Warning: '$1' associated with loopback network interface"
 			  found = 1
@@ -1049,19 +1466,24 @@ fi
 
 # Now some platform-specific tests
 #
-$dir/whatami >$tmp.tmp
-case "`sed <$tmp.tmp -e 's/  */ /g' -e 's/ \[.*//' | cut -d ' ' -f 4-`"
+case "`sed <$tmp.whatami -e 's/  */ /g' -e 's/ \[.*//' | cut -d ' ' -f 4-`"
 in
     *OpenBSD*)
-	allowkmem=`sysctl kern.allowkmem | sed -e 's/.*=//'`
-	if [ "$allowkmem" != 1 ]
+	if false
 	then
-	    echo "Warning: kern.allowkmem is \"$allowkmem\" not 1 and so openbsd PMDA will not be able"
-	    echo "         to access /dev/kmem"
-	    echo "         Suggest adding kern.allowkmem=1 to etc/sysctl.conf and rebooting."
+	    # redundant now the openbsd PMDA no longer reads /dev/mem
+	    # directly
+	    #
+	    allowkmem=`sysctl kern.allowkmem | sed -e 's/.*=//'`
+	    if [ "$allowkmem" != 1 ]
+	    then
+		echo "Warning: kern.allowkmem is \"$allowkmem\" not 1 and so openbsd PMDA will not be able"
+		echo "         to access /dev/kmem"
+		echo "         Suggest adding kern.allowkmem=1 to etc/sysctl.conf and rebooting."
+	    fi
 	fi
 	;;
 
 esac
 
-$verbose && echo "temp files:" $tmp.*
+$very_verbose && echo >&2 "temp files:" $tmp.*

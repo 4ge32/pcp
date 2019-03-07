@@ -1,7 +1,7 @@
 '\"macro stdmacro
 .\"
+.\" Copyright (C) 2015-2019 Marko Myllynen <myllynen@redhat.com>
 .\" Copyright (c) 2016-2018 Red Hat.
-.\" Copyright (C) 2015-2018 Marko Myllynen <myllynen@redhat.com>
 .\"
 .\" This program is free software; you can redistribute it and/or modify it
 .\" under the terms of the GNU General Public License as published by the
@@ -19,7 +19,9 @@
 \f3pmrep\f1 \- performance metrics reporter
 .SH SYNOPSIS
 \fBpmrep\fP
-[\fB\-123CdgGHIjkLnprRuUvVxz?\fP]
+[\fB\-1235CdgGHIjkLnprRuUvVxz?\fP]
+[\fB\-4\fP \fIaction\fP]
+[\fB\-6\fP \fIsort-metric\fP]
 [\fB\-8\fP|\fB\-9\fP \fIlimit\fP]
 [\fB\-a\fP \fIarchive\fP]
 [\fB\-\-archive\-folio\fP \fIfolio\fP]
@@ -250,12 +252,19 @@ file options (if any).
 .SH OPTIONS
 The available command line options are:
 .TP 5
+\fB\-0\fR \fIprecision\fR, \fB\-\-precision\-force\fR=\fIprecision\fR
+Like
+.B \-P
+but this option \fIwill\fP override per-metric specifications.
+.TP
 \fB\-1\fR, \fB\-\-dynamic\-header\fR
 Print a new dynamically adjusted header every time changes in
 availability of metric and instance values occur.
 By default a static header that never changes is printed once.
 See also
-.BR \-E .
+.B \-E
+and
+.BR \-4 .
 .TP
 \fB\-2\fR, \fB\-\-overall\-rank\fR
 Perform overall ranking of instances in archive.
@@ -272,7 +281,35 @@ including averages and peak times for values.
 \fB\-3\fR, \fB\-\-overall\-rank\-alt\fR
 Like
 .B \-2
-but print results in \fBpmrep\fP \fImetricspec\fP format.
+but print metric instances in \fBpmrep\fP \fImetricspec\fP format,
+to allow easily selecting the instances for further investigation.
+.TP
+\fB\-4\fR \fIaction\fR, \fB\-\-names\-change\fR=\fIaction\fR
+Specify which
+.I action
+to take on receiving a metric names change event during sampling.
+These events occur when a PMDA discovers new metrics sometime
+after starting up, and informs running client tools like
+.BR pmrep .
+Valid values for
+.I action
+are \fBupdate\fP (refresh metrics being sampled),
+\fBignore\fP (do nothing \- the default behaviour)
+and \fBabort\fP (exit the program if such an event happens).
+\fIupdate\fP implies \fB\-\-dynamic\-header\fP.
+.TP
+\fB\-5\fR, \fB\-\-ignore\-unknown\fR
+Silently ignore any metric name that cannot be resolved.
+At least one metric must be found for the tool to start.
+.TP
+\fB\-6\fR, \fB\-\-sort\-metric\fR=\fIsort-metric\fR
+Specify a sort reference metric to sort output by values with
+.BR \-X .
+By default sorting order is descending, prepending the metric
+name with the minus sign (``-'') will change the order to be ascending.
+See also
+.BR \-J " and "
+.BR \-N .
 .TP
 \fB\-8\fR \fIlimit\fR, \fB\-\-limit\-filter\fR=\fIlimit\fR
 Limit results to instances with values above/below
@@ -302,7 +339,7 @@ a directory containing one or more archives.
 See also
 .BR \-u .
 .TP
-.B \-\-archive\-folio
+\fB\-\-archive\-folio\fR=\fIfolio\fR
 Read metric source archives from the PCP archive
 .I folio
 created by tools like
@@ -504,10 +541,11 @@ non-leaf nodes of the PMNS tree for reporting.
 Perform instance live filtering.
 This allows capturing all filtered instances even if processes
 are restarted at some point (unlike without live filtering).
-Doing live filtering over a huge amount of instances naturally
-comes with some overhead so a bit of user caution is advised.
+Performing live filtering over a huge amount of instances will add
+some internal overhead so a bit of user caution is advised.
 See also
-.BR \-1 .
+.BR \-1 " and "
+.BR \-n .
 .TP
 \fB\-J\fR \fIrank\fR, \fB\-\-rank\fR=\fIrank\fR
 Limit results to highest/lowest
@@ -517,7 +555,8 @@ A positive integer will include highest valued instances in reporting.
 A negative integer will include lowest valued instances in reporting.
 A value of zero performs no ranking.
 See also
-.BR \-2 " and "
+.BR \-2 ,
+.BR \-6 " and "
 .BR \-8 .
 .TP
 \fB\-k\fR, \fB\-\-extended\-csv\fR
@@ -562,7 +601,7 @@ See also
 .TP
 \fB\-n\fR, \fB\-\-invert\-filter\fR
 Perform ranking before live filtering.
-By default instance live filter filtering (when requested, see
+By default instance live filtering (when requested, see
 .BR \-j )
 happens before instance ranking (when requested, see
 .BR \-J ).
@@ -576,24 +615,24 @@ filter reference metrics.
 By default ranking (see
 .BR \-J )
 happens for each metric individually.
-With predicate filter reference metrics, ranking is done only for the
-specified metrics.
-When reporting, the rest of the metrics sharing the same
+With predicates, ranking is done only for the
+specified predicate metrics.
+When reporting, rest of the metrics sharing the same
 .I instance domain
 (see
 .BR PCPIntro (1))
-as the predicates will include only the highest/lowest ranking
-instances of the corresponding predicates.
+as the predicate will include only the highest/lowest ranking
+instances of the corresponding predicate.
 .RS
 .PP
-So for example, when the using \fBproc.memory.rss\fP
-(resident size of process)
+So for example, using \fBproc.memory.rss\fP
+(resident memory size of process)
 as the
 .I predicate
-and including \fBproc.io.total_bytes\fP and \fBmem.util.used\fP as metrics
-to be reported, only the processes using most/least memory (as per
+metric together with \fBproc.io.total_bytes\fP and \fBmem.util.used\fP as
+metrics to be reported, only the processes using most/least (as per
 .BR \-J )
-will be included when reporting total bytes written by processes.
+memory will be included when reporting total bytes written by processes.
 Since \fBmem.util.used\fP is a single-valued metric (thus not sharing the
 same instance domain as the process-related metrics),
 it will be reported as usual.
@@ -654,11 +693,6 @@ is reduced one by one until the value fits,
 or not printed at all if it does not.
 The default is to use 3 decimal places (when applicable).
 This option will \fInot\fP override possible per-metric specifications.
-.TP
-\fB\-0\fR \fIprecision\fR, \fB\-\-precision\-force\fR=\fIprecision\fR
-Like
-.B \-P
-but this option \fIwill\fP override per-metric specifications.
 .TP
 \fB\-q\fR \fIscale\fR, \fB\-\-count\-scale\fR=\fIscale\fR
 .I Unit/scale
@@ -836,7 +870,8 @@ This is convenient to allow easily using
 .BR grep (1)
 to filter results or to more closely mimic other utilities.
 See also
-.BR \-i .
+.BR \-i " and "
+.BR \-6 .
 .TP
 \fB\-y\fR \fIscale\fR, \fB\-\-time\-scale\fR=\fIscale\fR
 .I Unit/scale

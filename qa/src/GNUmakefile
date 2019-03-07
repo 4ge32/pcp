@@ -1,6 +1,6 @@
 #!gmake
 #
-# Copyright (c) 2012,2014,2016 Red Hat.
+# Copyright (c) 2012,2014,2016,2018 Red Hat.
 # Copyright (c) 2009 Aconex.  All Rights Reserved.
 # Copyright (c) 1997-2002 Silicon Graphics, Inc.  All Rights Reserved.
 #

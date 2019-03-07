@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 Red Hat.
+ * Copyright (c) 2018-2019 Red Hat.
  *
  * This library is free software; you can redistribute it and/or modify it
  * under the terms of the GNU Lesser General Public License as published
@@ -71,10 +71,41 @@ server_init(int portcount, const char *localpath)
 	return NULL;
     }
 
-    proxy->redishost = sdsnew("localhost:6379");	/* TODO: config file */
+    proxy->redishost = sdscatfmt(sdsempty(), "%s:%u",
+		    redis_host ? redis_host : "localhost", redis_port);
     proxy->events = uv_default_loop();
     uv_loop_init(proxy->events);
     return proxy;
+}
+
+static void
+signal_handler(uv_signal_t *sighandle, int signum)
+{
+    uv_handle_t		*handle = (uv_handle_t *)sighandle;
+    struct proxy	*proxy = (struct proxy *)handle->data;
+    uv_loop_t		*loop = proxy->events;
+
+    if (signum == SIGHUP)
+	return;
+    pmNotifyErr(LOG_INFO, "pmproxy caught %s\n",
+		signum == SIGINT ? "SIGINT" : "SIGTERM");
+    uv_signal_stop(sighandle);
+    uv_stop(loop);
+}
+
+static void
+signal_init(struct proxy *proxy)
+{
+    static uv_signal_t	sighup, sigint, sigterm;
+    uv_loop_t		*loop = proxy->events;
+
+    uv_signal_init(loop, &sighup);
+    uv_signal_init(loop, &sigint);
+    uv_signal_init(loop, &sigterm);
+    sighup.data = sigint.data = sigterm.data = (void *)proxy;
+    uv_signal_start(&sighup, signal_handler, SIGHUP);
+    uv_signal_start(&sigint, signal_handler, SIGINT);
+    uv_signal_start(&sigterm, signal_handler, SIGTERM);
 }
 
 void
@@ -95,8 +126,9 @@ on_client_close(uv_handle_t *handle)
 {
     struct client	*client = (struct client *)handle;
 
-    if (pmDebugOptions.desperate)
-	fprintf(stderr, "client %p connection closed\n", client);
+    if (pmDebugOptions.context | pmDebugOptions.desperate)
+	fprintf(stderr, "%s: client %p connection closed\n",
+			"on_client_close", client);
 
     switch (client->protocol) {
     case STREAM_PCP:
@@ -109,19 +141,12 @@ on_client_close(uv_handle_t *handle)
 	break;
     }
 
-#if 0
-    struct proxy	*proxy = (struct proxy *)handle->data;
-    struct client	*tmp;
     /* remove client from the doubly-linked list */
-    tmp = client->prev;
-    tmp->next = client->next;
-    if (tmp->next == NULL)
-	proxy->tail = tmp;
-    else
-	tmp->next->prev = tmp;
-    /* TODO: free any partially accrued read/write buffers here */
+    if (client->next != NULL)
+	client->next->prev = client->prev;
+    *client->prev = client->next;
+
     free(client);
-#endif
 }
 
 static void
@@ -148,7 +173,7 @@ client_write(struct client *client, sds buffer, sds suffix)
     if (request) {
 	if (pmDebugOptions.pdu)
 	    fprintf(stderr, "%s: sending %ld bytes to client %p\n",
-			"client_write", sdslen(buffer), client);
+			"client_write", (long)sdslen(buffer), client);
 	request->buffer[nbuffers++] = uv_buf_init(buffer, sdslen(buffer));
 	if (suffix != NULL)
 	    request->buffer[nbuffers++] = uv_buf_init(suffix, sdslen(suffix));
@@ -238,8 +263,9 @@ on_client_connection(uv_stream_t *stream, int status)
 			pmGetProgname());
 	return;
     }
-    if (pmDebugOptions.pdu)
-	fprintf(stderr, "%s: new client %p\n", "on_client_connection", client);
+    if (pmDebugOptions.context | pmDebugOptions.pdu)
+	fprintf(stderr, "%s: accept new client %p\n",
+			"on_client_connection", client);
 
     status = uv_tcp_init(proxy->events, &client->stream.u.tcp);
     if (status != 0) {
@@ -258,16 +284,13 @@ on_client_connection(uv_stream_t *stream, int status)
     }
     handle = (uv_handle_t *)&client->stream.u.tcp;
     handle->data = (void *)proxy;
+    client->proxy = proxy;
 
     /* insert client into doubly-linked list at the head */
-    if (proxy->head != NULL) {
-	client->next = proxy->head;
-	proxy->head->prev = client;
-	proxy->head = client;
-    } else {
-	proxy->head = proxy->tail = client;
-    }
-    client->proxy = proxy;
+    if ((client->next = proxy->first) != NULL)
+	proxy->first->prev = &client->next;
+    proxy->first = client;
+    client->prev = &proxy->first;
 
     status = uv_read_start((uv_stream_t *)&client->stream.u.tcp,
 			    on_buffer_alloc, on_client_read);
@@ -279,7 +302,7 @@ on_client_connection(uv_stream_t *stream, int status)
 }
 
 static int
-OpenRequestPort(struct proxy *proxy, struct server *server, stream_family family,
+open_request_port(struct proxy *proxy, struct server *server, stream_family family,
 		const struct sockaddr *addr, int port, int maxpending)
 {
     struct stream	*stream = &server->stream;
@@ -312,7 +335,7 @@ OpenRequestPort(struct proxy *proxy, struct server *server, stream_family family
 }
 
 static int
-OpenRequestLocal(struct proxy *proxy, struct server *server,
+open_request_local(struct proxy *proxy, struct server *server,
 		const char *name, int maxpending)
 {
     uv_handle_t		*handle;
@@ -345,8 +368,8 @@ typedef struct proxyaddr {
     int			port;
 } proxyaddr;
 
-void *
-OpenRequestPorts(const char *localpath, int maxpending)
+static void *
+open_request_ports(const char *localpath, int maxpending)
 {
     int			inaddr, total, count, port, sts, i, n;
     int			with_ipv6 = strcmp(pmGetAPIConfig("ipv6"), "true") == 0;
@@ -408,11 +431,13 @@ OpenRequestPorts(const char *localpath, int maxpending)
     if ((proxy = server_init(total, localpath)) == NULL)
 	goto fail;
 
+    signal_init(proxy);
+
     count = n = 0;
     if (*localpath) {
 	server = &proxy->servers[n++];
 	server->stream.address = localpath;
-	if (OpenRequestLocal(proxy, server, localpath, maxpending) == 0)
+	if (open_request_local(proxy, server, localpath, maxpending) == 0)
 	    count++;
     }
 
@@ -422,7 +447,7 @@ OpenRequestPorts(const char *localpath, int maxpending)
 					STREAM_TCP4 : STREAM_TCP6;
 	server = &proxy->servers[n++];
 	server->stream.address = addrlist[i].address;
-	if (OpenRequestPort(proxy, server, family, sockaddr, port, maxpending) == 0)
+	if (open_request_port(proxy, server, family, sockaddr, port, maxpending) == 0)
 	    count++;
 	__pmSockAddrFree(addrlist[i].addr);
     }
@@ -444,8 +469,8 @@ fail:
     return NULL;
 }
 
-extern void
-ShutdownPorts(void *arg)
+static void
+shutdown_ports(void *arg)
 {
     struct proxy	*proxy = (struct proxy *)arg;
     struct server	*server;
@@ -457,7 +482,6 @@ ShutdownPorts(void *arg)
 	stream = &server->stream;
 	if (stream->active == 0)
 	    continue;
-	uv_close((uv_handle_t *)&stream, NULL);
 	if (server->presence)
 	    __pmServerUnadvertisePresence(server->presence);
     }
@@ -472,8 +496,8 @@ ShutdownPorts(void *arg)
     sdsfree(proxy->redishost);
 }
 
-void
-DumpRequestPorts(FILE *output, void *arg)
+static void
+dump_request_ports(FILE *output, void *arg)
 {
     struct proxy	*proxy = (struct proxy *)arg;
     struct stream	*stream;
@@ -515,8 +539,8 @@ setup_proxy(uv_timer_t *arg)
     setup_pcp_modules(proxy);
 }
 
-void
-MainLoop(void *arg)
+static void
+main_loop(void *arg)
 {
     struct proxy	*proxy = (struct proxy *)arg;
     uv_timer_t		attempt;
@@ -529,3 +553,10 @@ MainLoop(void *arg)
 
     uv_run(proxy->events, UV_RUN_DEFAULT);
 }
+
+struct pmproxy libuv_pmproxy = {
+    .openports	= open_request_ports,
+    .dumpports	= dump_request_ports,
+    .shutdown	= shutdown_ports,
+    .loop 	= main_loop,
+};

@@ -66,7 +66,10 @@ endif
 demos:	$(APPS) pmtrace.c
 
 pmtrace.c:	$(TOPDIR)/src/pmtrace/pmtrace.c
-	rm -f $@ && cp $< $@
+	rm -f $@
+	sed <$< >$@ \
+	    -e 's@"pmapi.h"@<pcp/pmapi.h>@' \
+	    -e 's@"trace.h"@<pcp/trace.h>@'
 
 app1.o:	app1.c $(TOPDIR)/src/include/pcp/pmapi.h
 	$(CCF) -c -o $@ app1.c
@@ -94,14 +97,23 @@ install_pcp:	install
 Makefile.demos:	Makefile.proto
 	rm -f $@
 	sed \
-		-e 's@PCP_INC_DIR@$(PCP_INC_DIR)@' \
-		-e 's/PTHREAD_LIB/$(LIB_FOR_PTHREADS)/' \
-		-e 's/DLOPEN_LIB/$(LIB_FOR_DLOPEN)/' \
-		-e 's/MATH_LIB/$(LIB_FOR_MATH)/' \
+		-e 's@PCP_INC_DIR@$(subst /pcp,,$(PCP_INC_DIR))@' \
+		-e 's@LD_FLAGS@-Wl,-rpath=$(PCP_LIB_DIR) -L$(PCP_LIB_DIR)@' \
+		-e 's@PTHREAD_LIB@$(LIB_FOR_PTHREADS)@' \
+		-e 's@DLOPEN_LIB@$(LIB_FOR_DLOPEN)@' \
+		-e 's@MATH_LIB@$(LIB_FOR_MATH)@' \
 		<$^ >$@
 
 Makefile.stub:	GNUmakefile.stub
 	rm -f $@
+ifeq "$(TARGET_OS)" "netbsd"
 	sed \
-		-e 's@\$$(PCP_ETC_DIR)@$(PCP_ETC_DIR)@' \
+		-e 's@PCP_INC_DIR@$(subst /pcp,,$(PCP_INC_DIR))@' \
+		-e 's@$$(PCP_ETC_DIR)@/etc@' \
 		<$^ >$@
+else
+	sed \
+		-e 's@PCP_INC_DIR@$(subst /pcp,,$(PCP_INC_DIR))@' \
+		-e 's@$$(PCP_ETC_DIR)@$(PCP_ETC_DIR)@' \
+		<$^ >$@
+endif

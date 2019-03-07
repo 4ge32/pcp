@@ -1,6 +1,6 @@
 #!/usr/bin/env pmpython
 #
-# Copyright (C) 2018 Red Hat.
+# Copyright (C) 2018-2019 Red Hat.
 # Copyright (C) 2004-2016 Dag Wieers <dag@wieers.com>
 #
 # This program is free software; you can redistribute it and/or modify it
@@ -62,7 +62,7 @@ COLOR = {
     'darkcyan': '\033[0;36m',
     'gray': '\033[0;37m',
 
-    'darkgray': '\033[1;30m',
+    'darkgray': '\033[90m',
     'red': '\033[1;31m',
     'green': '\033[1;32m',
     'yellow': '\033[1;33m',
@@ -353,25 +353,33 @@ class DstatPlugin(object):
             return label
         ret = ''
         ilist = self.instlist()
-        for _, name in enumerate(ilist):
+        for i, name in enumerate(ilist):
+            if i > 0:
+                ret = ret + CHAR['sep']
             name = self.label.replace('%I', name)
-            ret = ret + name
-        return '"' + ret + '"'
+            ret = ret + '"' + name  + '"'
+            for j, _ in enumerate(self.names):
+                if j > 0:
+                    ret = ret + CHAR['sep']
+        return ret
 
     def csvsubtitle(self):
         ret = ''
         if self.grouptype is None:
             for i, nick in enumerate(self.names):
-                ret = ret + '"' + nick + '"'
-                if i + 1 != len(self.names):
+                if i > 0:
                     ret = ret + CHAR['sep']
+                ret = ret + '"' + nick + '"'
             return ret
         ilist = self.instlist()
-        for _, _ in enumerate(ilist):
+        for i, name in enumerate(ilist):
+            if i > 0:
+                ret = ret + CHAR['sep']
+            name = self.label.replace('%I', name)
             for j, nick in enumerate(self.names):
-                ret = ret + '"' + nick + '"'
-                if j + 1 != len(self.names):
+                if j > 0 or i > 0:
                     ret = ret + CHAR['sep']
+                ret = ret + '"' + name + CHAR['colon'] + nick + '"'
         return ret
 
 
@@ -586,9 +594,15 @@ class DstatTool(object):
     def prepare_metrics(self, config):
         """ Using the list of requested plugins, prepare for sampling """
 
-        if not self.plugins:
+        # If no plugins were requested, or if all requested plugins
+        # are displaying only time, add the default reporting stats.
+        timelen = 0
+        for section in self.plugins:
+            if section in self.timeplugins:
+                timelen += 1
+        if not self.plugins or (timelen > 0 and timelen == len(self.plugins)):
             print('You did not select any stats, using -cdngy by default.')
-            self.plugins = ['cpu', 'disk', 'net', 'page', 'sys']
+            self.plugins += ['cpu', 'disk', 'net', 'page', 'sys']
 
         lib = self.pmconfig
         for section in self.plugins:
@@ -893,7 +907,7 @@ class DstatTool(object):
         return paths
 
     def show_plugins(self):
-        sys.stdout.write("internal:\n\t")
+        sys.stdout.write("timestamp plugins:\n\t")
         sep = ''
         for i, name in enumerate(sorted(self.timeplugins)):
             if i != 0:
@@ -913,7 +927,7 @@ class DstatTool(object):
         config.optionxform = str
         try:
             config.read(files)
-            sys.stdout.write("%s:\n\t" % path)
+            sys.stdout.write("%s plugins:\n\t" % path)
             self.show_config_plugins(config, columns)
         except:
             sys.stderr.write("%s: failed to read configuration file(s)" % path)
@@ -1485,19 +1499,21 @@ class DstatTool(object):
         # Note that some plugins (time-based) will not have
         # any corresponding entry in the results.
 
-        results = self.pmconfig.get_sorted_results()
+        results = self.pmconfig.get_ranked_results()
         for i, plugin in enumerate(self.totlist):
             if i == 0:
                 sep = ''
             else:
                 sep = THEME['frame'] + CHAR['pipe']
-            if plugin in self.timelist:
+            if plugin not in vislist:
+                pass
+            elif plugin in self.timelist:
                 line = line + sep + self.tshow(plugin, self.pmfg_ts)
             elif plugin.grouptype is None:
                 for m, name in enumerate(plugin.mgroup):
                     line = line + sep + self.mshow(plugin, m, results[name])
                     sep = CHAR['space']
-            else:
+            elif plugin.mgroup:
                 line = line + sep + self.gshow(plugin, results)
             if self.totlist == vislist:
                 continue
@@ -1517,7 +1533,7 @@ class DstatTool(object):
                     for m, name in enumerate(plugin.mgroup):
                         oline = oline + sep + self.mshowcsv(plugin, m, results[name])
                         sep = CHAR['sep']
-                else:
+                elif plugin.mgroup:
                     oline = oline + sep + self.gshowcsv(plugin, results)
 
         # Prepare the colors for intermediate updates

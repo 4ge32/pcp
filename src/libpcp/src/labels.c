@@ -546,6 +546,14 @@ __pmMergeLabelSets(pmLabel *alabels, const char *abuf, int na,
     if (no)
 	*no = 0;	/* number of output labels */
 
+    /* integrity check */
+    if ((na > 0 && alabels == NULL) || (nb > 0 && blabels == NULL)) {
+	if (pmDebugOptions.labels)
+	    fprintf(stderr, "__pmMergeLabelSets: invalid or corrupt arguments\n");
+	sts = -EINVAL;
+	goto done;
+    }
+
     /* Walk over both label sets inserting all names into the output
      * buffer, but prefering b-group values over those in the a-group.
      * As we go, check for duplicates between a-group & b-group (since
@@ -648,7 +656,7 @@ pmMergeLabelSets(pmLabelSet **sets, int nsets, char *buffer, int buflen,
 	return -EINVAL;
 
     for (i = 0; i < nsets; i++) {
-	if (sets[i] == NULL)
+	if (sets[i] == NULL || sets[i]->nlabels < 0)
 	    continue;
 
 	/* avoid overwriting the working set, if there is one */
@@ -1020,13 +1028,13 @@ pmLookupLabels(pmID pmid, pmLabelSet **labels)
     pmLabelSet	*lsp = NULL, *sets = NULL;
     pmDesc	desc;
     pmID	ident;
-    int		n, sts, count, total;
+    int		sts, count, total;
 
     if ((sts = pmLookupDesc(pmid, &desc)) < 0)
 	return sts;
 
-    /* context, domain, [indom], cluster, item, [insts...] */
-    total = (desc.indom == PM_INDOM_NULL) ? 4 : 6;
+    /* context, domain, [indom], cluster, item */
+    total = (desc.indom == PM_INDOM_NULL) ? 4 : 5;
     if ((sets = calloc(total, sizeof(pmLabelSet))) == NULL)
 	return -ENOMEM;
     count = 0;
@@ -1075,27 +1083,6 @@ pmLookupLabels(pmID pmid, pmLabelSet **labels)
 	sets[count++] = *lsp;
 	free(lsp);
 	lsp = NULL;
-    }
-
-    if (desc.indom != PM_INDOM_NULL) {
-	if ((sts = n = pmGetInstancesLabels(desc.indom, &lsp)) < 0)
-	    goto fail;
-	if (lsp && n + count > total) {
-	    /* make space on the end for additional instance sets */
-	    sets = realloc(sets, (count + n) * sizeof(pmLabelSet));
-	    if (sets == NULL) {
-		free(lsp);
-		lsp = NULL;
-		sts = -ENOMEM;
-		goto fail;
-	    }
-	}
-	if (lsp) {
-	    memcpy(&sets[count], lsp, n * sizeof(pmLabelSet));
-	    count += n;
-	    free(lsp);
-	    lsp = NULL;
-	}
     }
 
     *labels = sets;

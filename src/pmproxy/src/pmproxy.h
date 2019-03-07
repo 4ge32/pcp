@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2013,2018 Red Hat.
+ * Copyright (c) 2012-2013,2018-2019 Red Hat.
  * Copyright (c) 2002 Silicon Graphics, Inc.  All Rights Reserved.
  * 
  * This program is free software; you can redistribute it and/or modify it
@@ -15,15 +15,25 @@
 #ifndef PMPROXY_H
 #define PMPROXY_H
 
-extern void *OpenRequestPorts(const char *, int);
-extern void DumpRequestPorts(FILE *, void *);
-extern void *GetServerInfo(void);
-extern void MainLoop(void *);
-extern void ShutdownPorts(void *);
+typedef void *(*proxyOpenRequestPorts)(const char *, int);
+typedef void (*proxyDumpRequestPorts)(FILE *, void *);
+typedef void (*proxyShutdownPorts)(void *);
+typedef void (*proxyMainLoop)(void *);
 
-extern void SignalShutdown(void);
+typedef struct pmproxy {
+    proxyOpenRequestPorts	openports;
+    proxyDumpRequestPorts	dumpports;
+    proxyShutdownPorts		shutdown;
+    proxyMainLoop		loop;
+} pmproxy;
+
+extern struct pmproxy libpcp_pmproxy;
+extern struct pmproxy libuv_pmproxy;
+
+extern void *GetServerInfo(void);
 extern void Shutdown(void);
 
-extern int timeToDie;	/* for SIGINT handling */
+extern int redis_port;		/* connect to Redis on this port */
+extern char *redis_host;	/* connect to Redis on this host */
 
 #endif /* PMPROXY_H */

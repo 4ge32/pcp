@@ -174,7 +174,7 @@ ECHO	= @echo@
 LN_S	= @LN_S@
 GREP    = @grep@
 GIT	= @GIT@
-CLINT	= @CPPCHECK@ --std=posix --force --quiet --error-exitcode=1
+CLINT	= @CPPCHECK@ --std=posix --force --quiet --error-exitcode=1 -I$(TOPDIR)/src/include/pcp -I/usr/include/bits
 PYLINT	= @PYLINT@ --rcfile=$(TOPDIR)/.pylintrc --output-format=colorized
 PYTHON	= @PYTHON@
 PYTHON3	= @PYTHON3@
@@ -209,7 +209,6 @@ LZMA	= @lzma@
 XZ	= @xz@
 TAR	= @tar@
 RPMPROG	= @rpmprog@
-PACKAGE_MAKER = @package_maker@
 HDIUTIL = @hdiutil@
 MKINSTALLP = @mkinstallp@
 DLLTOOL = @dlltool@
@@ -343,14 +342,11 @@ HAVE_BOOST_FLYWEIGHT_HPP = @HAVE_BOOST_FLYWEIGHT_HPP@
 # configuration state for optional performance domains
 SYSTEMD_CFLAGS = @SYSTEMD_CFLAGS@
 SYSTEMD_LIBS = @SYSTEMD_LIBS@
-PAPI_CFLAGS = @PAPI_CFLAGS@
-PAPI_LIBS = @PAPI_LIBS@
 PFM_LIBS = @PFM_LIBS@
 IB_LIBS = @IB_LIBS@
 PMDA_BCC = @PMDA_BCC@
 PMDA_RPM = @PMDA_RPM@
 PMDA_JSON = @PMDA_JSON@
-PMDA_PAPI = @PMDA_PAPI@
 PMDA_PODMAN = @PMDA_PODMAN@
 PMDA_LIBVIRT = @PMDA_LIBVIRT@
 PMDA_SYSTEMD = @PMDA_SYSTEMD@
@@ -706,13 +702,16 @@ PYTHON_PREFIX=@python_prefix@
 SETUP_PY_BUILD_OPTIONS = --include-dirs=$(TOPDIR)/src/include:$(TOPDIR)/src/include/pcp$(EXTRA_PY_INCLUDES)
 SETUP_PY_BUILD_OPTIONS += --library-dirs=$(TOPDIR)/src/libpcp/src:$(TOPDIR)/src/libpcp_pmda/src:$(TOPDIR)/src/libpcp_gui/src:$(TOPDIR)/src/libpcp_import/src:$(TOPDIR)/src/libpcp_mmv/src
 SETUP_PY_INSTALL_OPTIONS = --skip-build
-SETUP_PY_INSTALL_OPTIONS += --root="$${DIST_ROOT-/}"
+SETUP_PY_INSTALL_OPTIONS += --root="$${DIST_ROOT:-/}"
 ifeq "$(PYTHON_PREFIX)" "/usr"
 ifeq "$(PACKAGE_DISTRIBUTION)" "debian"
 SETUP_PY_INSTALL_OPTIONS += --install-layout=deb
 endif
 else
 SETUP_PY_INSTALL_OPTIONS += --prefix=$(PYTHON_PREFIX)
+endif
+ifeq "$(ENABLE_PYTHON3)" "true"
+SETUP_PY_BUILD_OPTIONS += -DENABLE_PYTHON3
 endif
 # RPM byte-compiles and installs results in our DIST_ROOT, cater for this:
 ifeq "$(shell [ '$(TARGET_OS)' = linux -a '$(PACKAGE_DISTRIBUTION)' != gentoo \
@@ -821,10 +820,14 @@ endif	# linux && !gentoo if
 # becomes
 # LIBS = $(SUBLIBS) -L../libpcp/src -L../libpcp_qmc/src ... -L/usr/lib -lpcp_qmc ...
 #
-QTFIX = $(AWK) '$$1 == "LIBS" { printf $$1; for (i=2;i<=NF;i++) { if ($$i~/^-L\//) { save=save " " $$i; continue } else if (save!="" && $$i~/^-l/) { printf " %s",save; save="" } printf " %s",$$i } if (save!="") printf " %s",save; print ""; next } { print }'
+QTFIX = sed -e 's/Makefile.new/Makefile/g' <Makefile.new | $(AWK) '$$1 == "LIBS" { printf $$1; for (i=2;i<=NF;i++) { if ($$i~/^-L\//) { save=save " " $$i; continue } else if (save!="" && $$i~/^-l/) { printf " %s",save; save="" } printf " %s",$$i } if (save!="") printf " %s",save; print ""; next } { print }' >Makefile.fix
 
 # Qt magic for build/installs across all the supported platforms
-QTMAKE = $(QMAKE) CONFIG+=$(QT_RELEASE) && $(QTFIX) <Makefile >Makefile.fix && mv Makefile.fix Makefile && $(MAKE) $(MAKEOPTS) -f Makefile
+# because qmake does not always get it right, e.g. omitting -fPIC for
+# static libraries in Qt5 on Ubuntu x86_64, we need to push our CFLAGS, CXXFLAGS
+# (usually empty) and LDFLAGS down
+#
+QTMAKE = rm -f Makefile.new Makefile.fix; CFLAGS='$(CFLAGS)' CXXFLAGS='$(CXXFLAGS)' LDFLAGS='$(LDFLAGS)' $(QMAKE) -o Makefile.new CONFIG+=$(QT_RELEASE) && $(QTFIX) && ( if [ -f Makefile ]; then if diff Makefile Makefile.fix >/dev/null; then :; else rm -f Makefile; mv Makefile.fix Makefile; fi; else mv Makefile.fix Makefile; fi ); rm -f Makefile.new Makefile.fix; $(MAKE) $(MAKEOPTS) -f Makefile
 ifeq ($(PCP_PLATFORM),darwin)
 MACBUILD = build/$(QT_RELEASE)/$(COMMAND).app/Contents
 BINARY = $(MACBUILD)/MacOS/$(COMMAND)

@@ -13,36 +13,36 @@ _pcp_complete()
     # Register arguments
     case $cmd in
     pcp2elasticsearch)
-        all_args="ahLKcCeVHGASTOstRrIijJ89nNvP0qQbByYgXxp"
-        arg_regex="-[ahKceASTOstZiJ89NP0qQbByYgXxp]"
+        all_args="ahLKcCeVHGASTOstRrIijJ4589nNvP0qQbByYgXxp"
+        arg_regex="-[ahKceASTOstZiJ489NP0qQbByYgXxp]"
     ;;
     pcp2graphite)
-        all_args="ahLKcCeVHGASTOstRrIijJ89nNvP0qQbByYgpXEx"
-        arg_regex="-[ahKceASTOstZiJ89NP0qQbByYgpXEx]"
+        all_args="ahLKcCeVHGASTOstRrIijJ4589nNvP0qQbByYgpXEx"
+        arg_regex="-[ahKceASTOstZiJ489NP0qQbByYgpXEx]"
     ;;
     pcp2influxdb)
-        all_args="ahLKcCeVHGASTOstRrIijJ89nNvP0qQbByYgxUEX"
-        arg_regex="-[ahKceASTOstZiJ89NP0qQbByYgxUEX]"
+        all_args="ahLKcCeVHGASTOstRrIijJ4589nNvP0qQbByYgxUEX"
+        arg_regex="-[ahKceASTOstZiJ489NP0qQbByYgxUEX]"
     ;;
     pcp2json)
-        all_args="ahLKcCeVHGASTOstRrZzrIijJ89nNvP0qQbByYFfxXE"
-        arg_regex="-[ahKceASTOstZiJ89NP0qQbByYFf]"
+        all_args="ahLKcCeVHGASTOstRrZzrIijJ4589nNvP0qQbByYFfxXE"
+        arg_regex="-[ahKceASTOstZiJ489NP0qQbByYFf]"
     ;;
     pcp2spark)
-        all_args="ahLKcCeVHGASTOstRrZzrIijJ89nNvP0qQbByYgp"
-        arg_regex="-[ahKceASTOstZiJ89NP0qQbByYgp]"
+        all_args="ahLKcCeVHGASTOstRrZzrIijJ4589nNvP0qQbByYgp"
+        arg_regex="-[ahKceASTOstZiJ489NP0qQbByYgp]"
     ;;
     pcp2xlsx)
-        all_args="ahLKcCeVHGASTOstRrZzrIivP0qQbByYFf"
-        arg_regex="-[ahKceASTOstZiP0qQbByYgFf]"
+        all_args="ahLKcCeVHGASTOstRrZzrIivP045qQbByYFf"
+        arg_regex="-[ahKceASTOstZiP04qQbByYgFf]"
     ;;
     pcp2xml)
-        all_args="ahLKcCeVHGASTOstRrZzrIijJ89nNvP0qQbByYFfXx"
-        arg_regex="-[ahKceASTOstZiJ89NP0qQbByYgFf]"
+        all_args="ahLKcCeVHGASTOstRrZzrIijJ4589nNvP0qQbByYFfXx"
+        arg_regex="-[ahKceASTOstZiJ489NP0qQbByYgFf]"
     ;;
     pcp2zabbix)
-        all_args="ahLKcCeVHGASTOstRrIijJ89nNvP0qQbByYgpXExl"
-        arg_regex="-[ahKceASTOstiJ89NP0qQbByYgpXEx]"
+        all_args="ahLKcCeVHGASTOstRrIijJ4589nNvP0qQbByYgpXExl"
+        arg_regex="-[ahKceASTOstiJ489NP0qQbByYgpXEx]"
     ;;
     pmdumplog)
         all_args="adehiLlmnrSsTtVvxZz"
@@ -77,12 +77,20 @@ _pcp_complete()
         arg_regex="-[abhKnOZ]"
     ;;
     pmrep)
-        all_args="012389AaBbCcdEeFfGgHhIiJjKkLlNnOoPpQqRrSsTtUuVvWwXxYyZz"
-        arg_regex="-[089ABabcEeFfhiJKlNOoPQqSsTtWwXYyZ]"
+        all_args="012345689AaBbCcdEeFfGgHhIiJjKkLlNnOoPpQqRrSsTtUuVvWwXxYyZz"
+        arg_regex="-[04689ABabcEeFfhiJKlNOoPQqSsTtWwXYyZ]"
+    ;;
+    pmseries)
+        all_args="acdFghIiLlMmnpqSsV"
+        arg_regex="-[cghp]"
     ;;
     pmstore)
         all_args="FfhiKLnV"
         arg_regex="-[hiKn]"
+    ;;
+    pmstat)
+        all_args="AagHhLlnOPpSsTtVxZz"
+        arg_regex="-[AaHhnOpSsTtZ]"
     ;;
     pmval)
         all_args="AadfghiKLnOprSsTtUvVwxZz"
@@ -122,12 +130,15 @@ _pcp_complete()
         done < $conf
         [[ "$cur" == : ]] && cur=
         COMPREPLY=( $(compgen -W "${sets[*]}" -- "$cur") )
+    elif [[ $cmd == pmseries && ! "${COMP_WORDS[$((COMP_CWORD-1))]}" =~ $arg_regex ]]; then
+        # pmseries(1) metric names
+        COMPREPLY=( $(compgen -W '$(command pmseries -m 2> /dev/null)' -- "$cur") )
     elif [[ ! "${COMP_WORDS[$((COMP_CWORD-1))]}" =~ $arg_regex ]]; then
-        # Metrics
-        if [[ $cmd != pmlogsummary || \
+        # Metric names
+        if [[ ($cmd != pmlogsummary && $cmd != pmstat) || \
             ( $COMP_CWORD > 1 && ${COMP_WORDS[$((COMP_CWORD-1))]} != -* && ${COMP_WORDS[$((COMP_CWORD-2))]} != -* ) ]]; then
             COMPREPLY=( $(compgen -W '$(command pminfo 2> /dev/null)' -- "$cur") )
         fi
     fi
 }
-complete -F _pcp_complete -o default pcp2elasticsearch pcp2graphite pcp2influxdb pcp2json pcp2spark pcp2xlsx pcp2xml pcp2zabbix pmdumplog pmdumptext pmevent pminfo pmlogcheck pmlogextract pmlogsummary pmprobe pmrep pmstore pmval
+complete -F _pcp_complete -o default pcp2elasticsearch pcp2graphite pcp2influxdb pcp2json pcp2spark pcp2xlsx pcp2xml pcp2zabbix pmdumplog pmdumptext pmevent pminfo pmlogcheck pmlogextract pmlogsummary pmprobe pmrep pmseries pmstat pmstore pmval

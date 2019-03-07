@@ -16,9 +16,13 @@
 
 #include "pmwebapi.h"
 #include "libpcp.h"
+#include "mmv_stats.h"
+#include "slots.h"
 
 #ifdef HAVE_LIBUV
 #include <uv.h>
+#else
+typedef void uv_loop_t;
 #endif
 
 /*
@@ -67,7 +71,8 @@ typedef struct pmDiscover {
     pmDiscoverModule		*module;	/* global state from caller */
     pmDiscoverFlags		flags;		/* state for discovery process */
     pmTimespec			timestamp;	
-    int				ctx;		/* PMAPI context or .meta fd */
+    int				ctx;		/* PMAPI context handle ) */
+    int				fd;		/* meta file descriptor */
 #ifdef HAVE_LIBUV
     uv_fs_event_t		*event_handle;	/* uv fs_notify event handle */ 
     uv_stat_t			statbuf;	/* stat buffer from event CB */
@@ -89,6 +94,21 @@ extern void pmSeriesDiscoverInDom(pmDiscoverEvent *,
 				pmInResult *, void *);
 extern void pmSeriesDiscoverText(pmDiscoverEvent *,
 				int, int, char *, void *);
+
+/*
+ * Module internals data structure
+ */
+typedef struct discoverModuleData {
+    unsigned int		handle;		/* callbacks context handle */
+    sds				logname;	/* archive directory dirname */
+    sds				hostspec;	/* slots connection hostspec */
+    mmv_registry_t		*metrics;	/* registry of metrics */
+    uv_loop_t			*events;	/* event library loop */
+    redisSlots			*slots;		/* server slots data */
+    void			*data;		/* user-supplied pointer */
+} discoverModuleData;
+
+extern discoverModuleData *getDiscoverModuleData(pmDiscoverModule *);
 
 #ifdef HAVE_LIBUV
 extern int pmDiscoverRegister(const char *,

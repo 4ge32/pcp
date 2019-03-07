@@ -2,7 +2,7 @@ Summary: System-level performance monitoring and performance management
 Name: @package_name@
 Version: @package_version@
 Release: @package_release@@package_sgirelease@
-License: GPLv2+ and LGPLv2.1+ and CC-BY
+License: GPLv2+ and LGPLv2+ and CC-BY
 URL: https://pcp.io
 Group: Applications/System
 Source: @package_name@-@package_version@.src.tar.gz
@@ -72,9 +72,6 @@ BuildRequires: initscripts man /bin/hostname
 %endif
 %if "@pmda_rpm@" == "true"
 BuildRequires: rpm-devel
-%endif
-%if "@pmda_papi@" == "true"
-BuildRequires: papi-devel
 %endif
 %if "@pmda_podman@" == "true"
 BuildRequires: libvarlink-devel
@@ -153,21 +150,11 @@ Requires: initscripts
 if [ %1 -eq 0 ]
 then
     PCP_PMDAS_DIR=@pcp_pmdas_dir@
-    PCP_ETC_DIR=@pcp_etc_dir@
-    if [ -f "$PCP_ETC_DIR/pcp/pmcd/pmcd.conf" -a -f "$PCP_PMDAS_DIR/%2/domain.h" ]
+    PCP_PMCDCONF_PATH=@pcp_pmcdconf_path@
+    if [ -f "$PCP_PMCDCONF_PATH" -a -f "$PCP_PMDAS_DIR/%2/domain.h" ]
     then
 	(cd $PCP_PMDAS_DIR/%2/ && ./Remove >/dev/null 2>&1)
     fi
-fi
-}
-
-# force upgrade of PMDAs starting in "notready" state
-%global pmda_notready() %{expand:
-PCP_PMDAS_DIR=@pcp_pmdas_dir@
-PCP_ETC_DIR=@pcp_etc_dir@
-if grep -q ^%2 "$PCP_ETC_DIR/pcp/pmcd/pmcd.conf" 2>/dev/null
-then
-    touch $PCP_PMDAS_DIR/%2/.NeedInstall
 fi
 }
 
@@ -206,7 +193,7 @@ applications to easily retrieve and process any subset of that data.
 # pcp-conf
 #
 %package conf
-License: LGPLv2.1+
+License: LGPLv2+
 Group: System Environment/Libraries
 Summary: Performance Co-Pilot run-time configuration
 URL: https://pcp.io
@@ -221,7 +208,7 @@ Performance Co-Pilot (PCP) run-time configuration
 # pcp-libs
 #
 %package libs
-License: LGPLv2.1+
+License: LGPLv2+
 Group: System Environment/Libraries
 Summary: Performance Co-Pilot run-time libraries
 URL: https://pcp.io
@@ -235,7 +222,7 @@ Performance Co-Pilot (PCP) run-time libraries
 # pcp-libs-devel
 #
 %package libs-devel
-License: GPLv2+ and LGPLv2.1+
+License: GPLv2+ and LGPLv2+
 Group: Development/Libraries
 Summary: Performance Co-Pilot (PCP) development headers
 URL: https://pcp.io
@@ -247,7 +234,7 @@ Performance Co-Pilot (PCP) headers for development.
 # pcp-devel
 #
 %package devel
-License: GPLv2+ and LGPLv2.1+
+License: GPLv2+ and LGPLv2+
 Group: Development/Libraries
 Summary: Performance Co-Pilot (PCP) development tools and documentation
 URL: https://pcp.io
@@ -555,10 +542,7 @@ Group: Applications/System
 Summary: Performance Co-Pilot tools for importing sar data into PCP archive logs
 URL: https://pcp.io
 Requires: pcp-libs = @package_version@ perl-PCP-LogImport = @package_version@
-%if "%{_vendor}" == "suse"
-%else
-Requires: perl(XML::TokeParser)
-%endif
+Maybe-Requires: perl(XML::TokeParser)
 
 
 %description import-sar2pcp
@@ -588,10 +572,7 @@ Group: Applications/System
 Summary: Performance Co-Pilot tools for importing spreadsheet data into PCP archive logs
 URL: https://pcp.io
 Requires: pcp-libs = @package_version@ perl-PCP-LogImport = @package_version@
-%if "%{_vendor}" == "suse"
-%else
-Requires: perl(XML::TokeParser)
-%endif
+Maybe-Requires: perl(XML::TokeParser)
 
 %description import-sheet2pcp
 Performance Co-Pilot (PCP) front-end tools for importing spreadsheet data
@@ -890,7 +871,7 @@ Requires: pcp-libs = @package_version@
 # https://fedoraproject.org/wiki/Packaging:Guidelines "Renaming/Replacing Existing Packages"
 Provides: dstat = @package_version@
 Provides: /usr/bin/dstat
-Obsoletes: dstat <= 0.7.3-5
+Obsoletes: dstat <= 0.8
 %endif
 
 %description system-tools
@@ -973,25 +954,6 @@ interface rules, type enforcement and file context adjustments for an
 updated policy package.
 %endif
 
-%if "@pmda_papi@" == "true"
-#
-# pcp-pmda-papi
-#
-%package pmda-papi
-License: GPLv2+
-Group: Applications/System
-Summary: Performance Co-Pilot (PCP) metrics for Performance API and hardware counters
-URL: https://pcp.io
-Requires: pcp-libs = @package_version@
-
-BuildRequires: papi-devel
-
-%description pmda-papi
-This package contains the PCP Performance Metrics Domain Agent (PMDA) for
-collecting hardware counters statistics through PAPI (Perforamance API).
-#end pcp-pmda-papi
-%endif
-
 %if "@pmda_infiniband@" == "true"
 #
 # pcp-pmda-infiniband
@@ -1053,6 +1015,7 @@ Requires: libpfm4 >= 4.4
 Requires: libpfm >= 4.4
 %endif
 BuildRequires: libpfm-devel >= 4.4
+Obsoletes: pcp-pmda-papi
 
 %description pmda-perfevent
 This package contains the PCP Performance Metrics Domain Agent (PMDA) for
@@ -1070,7 +1033,7 @@ Group: Applications/System
 Summary: Performance Co-Pilot (PCP) metrics for ActiveMQ
 URL: https://pcp.io
 Requires: perl-PCP-PMDA = @package_version@
-Requires: perl(LWP::UserAgent)
+Maybe-Requires: perl(LWP::UserAgent)
 
 %description pmda-activemq
 This package contains the PCP Performance Metrics Domain Agent (PMDA) for
@@ -1088,9 +1051,9 @@ Group: Applications/System
 Summary: Performance Co-Pilot (PCP) metrics for BIND servers
 URL: https://pcp.io
 Requires: perl-PCP-PMDA = @package_version@
-Requires: perl(LWP::UserAgent)
-Requires: perl(XML::LibXML)
-Requires: perl(File::Slurp)
+Maybe-Requires: perl(LWP::UserAgent)
+Maybe-Requires: perl(XML::LibXML)
+Maybe-Requires: perl(File::Slurp)
 
 %description pmda-bind2
 This package contains the PCP Performance Metrics Domain Agent (PMDA) for
@@ -1123,8 +1086,8 @@ Group: Applications/System
 Summary: Performance Co-Pilot (PCP) metrics for NutCracker (TwemCache)
 URL: https://pcp.io
 Requires: perl-PCP-PMDA = @package_version@
-Requires: perl(YAML::XS::LibYAML)
-Requires: perl(JSON)
+Maybe-Requires: perl(YAML::XS::LibYAML)
+Maybe-Requires: perl(JSON)
 
 %description pmda-nutcracker
 This package contains the PCP Performance Metrics Domain Agent (PMDA) for
@@ -1299,8 +1262,8 @@ Group: Applications/System
 Summary: Performance Co-Pilot (PCP) metrics for MySQL
 URL: https://pcp.io
 Requires: perl-PCP-PMDA = @package_version@
-Requires: perl(DBI)
-Requires: perl(DBD::mysql)
+Maybe-Requires: perl(DBI)
+Maybe-Requires: perl(DBD::mysql)
 
 %description pmda-mysql
 This package contains the PCP Performance Metrics Domain Agent (PMDA) for
@@ -1362,7 +1325,7 @@ Group: Applications/System
 Summary: Performance Co-Pilot (PCP) metrics for the Nginx Webserver
 URL: https://pcp.io
 Requires: perl-PCP-PMDA = @package_version@
-Requires: perl(LWP::UserAgent)
+Maybe-Requires: perl(LWP::UserAgent)
 
 %description pmda-nginx
 This package contains the PCP Performance Metrics Domain Agent (PMDA) for
@@ -1380,7 +1343,7 @@ Group: Applications/System
 Summary: Performance Co-Pilot (PCP) metrics for the Oracle database
 URL: https://pcp.io
 Requires: perl-PCP-PMDA = @package_version@
-Requires: perl(DBI)
+Maybe-Requires: perl(DBI)
 
 %description pmda-oracle
 This package contains the PCP Performance Metrics Domain Agent (PMDA) for
@@ -1419,9 +1382,7 @@ Requires: postfix-perl-scripts
 %if 0%{?rhel} <= 5
 Requires: postfix
 %endif
-%if "%{_vendor}" == "suse"
-Requires: postfix-doc
-%endif
+Maybe-Requires: postfix-doc
 
 %description pmda-postfix
 This package contains the PCP Performance Metrics Domain Agent (PMDA) for
@@ -1484,7 +1445,7 @@ Group: Applications/System
 Summary: Performance Co-Pilot (PCP) metrics for Simple Network Management Protocol
 URL: https://pcp.io
 Requires: perl-PCP-PMDA = @package_version@
-Requires: perl(Net::SNMP)
+Maybe-Requires: perl(Net::SNMP)
 
 %description pmda-snmp
 This package contains the PCP Performance Metrics Domain Agent (PMDA) for
@@ -2054,7 +2015,7 @@ URL: https://pcp.io
 Requires: pcp = @package_version@
 %description pmda-summary
 This package contains the PCP Performance Metrics Domain Agent (PMDA) for
-collecting metrics about other installed pmdas.
+collecting metrics about other installed PMDAs.
 # end pcp-pmda-summary
 
 %if "@pmda_systemd@" == "true"
@@ -2297,16 +2258,13 @@ awk '{print $NF}' $DIST_MANIFEST | egrep 'pcp2zabbix' >export_pcp2zabbix_files
 %endif
 awk '{print $NF}' $DIST_MANIFEST | egrep 'zabbix|zbxpcp' | grep -v pcp2zabbix >export_zabbix_agent_files
 %if "@pmda_infiniband@" == "true"
-awk '{print $NF}' $DIST_MANIFEST | egrep 'infiniband|pmdaib|pmdas/ib' >pmda_infiniband_files
-%endif
-%if "@pmda_papi@" == "true"
-awk '{print $NF}' $DIST_MANIFEST | egrep 'pmdas/papi' >pmda_papi_files
+awk '{print $NF}' $DIST_MANIFEST | egrep 'pmdas/infiniband|pmdaib|pmdas/ib' >pmda_infiniband_files
 %endif
 %if "@pmda_podman@" == "true"
 awk '{print $NF}' $DIST_MANIFEST | egrep 'pmdas/podman' > pmda_podman_files
 %endif
 %if "@pmda_perfevent@" == "true"
-awk '{print $NF}' $DIST_MANIFEST | egrep 'perfevent|perfalloc.1' > pmda_perfevent_files
+awk '{print $NF}' $DIST_MANIFEST | egrep 'pmdas/perfevent|perfalloc.1' > pmda_perfevent_files
 %endif
 %if "@pmda_systemd@" == "true"
 awk '{print $NF}' $DIST_MANIFEST | egrep 'pmdas/systemd' > pmda_systemd_files
@@ -2413,7 +2371,7 @@ awk '{print $NF}' $DIST_MANIFEST | egrep -e 'pmdas/weblog' > pmda_weblog_files
 awk '{print $NF}' $DIST_MANIFEST | egrep -e 'zeroconf|daily[-_]report|/sa$' > zeroconf_files
 
 touch gui_files webapi_files manager_files pmda_infiniband_files \
-      pmda_papi_files pmda_perfevent_files pmda_podman_files \
+      pmda_perfevent_files pmda_podman_files \
       pmda_bonding_files pmda_dbping_files pmda_pdns_files \
       pmda_ds389_files pmda_ds389log_files pmda_gpfs_files \
       pmda_gpsd_files pmda_lustre_files pmda_lustrecomm_files \
@@ -2491,7 +2449,6 @@ BEGIN {
     while( getline < "manager_files") manager[$0]=1;
     while( getline < "testsuite_files") testsuite[$0]=1;
     while( getline < "pmda_infiniband_files") pmda_infiniband[$0]=1;
-    while( getline < "pmda_papi_files") pmda_papi[$0]=1;
     while( getline < "pmda_podman_files") pmda_podman[$0]=1;
     while( getline < "pmda_perfevent_files") pmda_perfevent[$0]=1;
 %if "@pmda_activemq@" == "true"
@@ -2629,7 +2586,6 @@ BEGIN {
     else if (manager[$NF]) f="manager_files.rpm";
     else if (testsuite[$NF]) f="testsuite_files.rpm";
     else if (pmda_infiniband[$NF]) f="pmda_infiniband_files.rpm";
-    else if (pmda_papi[$NF]) f="pmda_papi_files.rpm";
     else if (pmda_podman[$NF]) f="pmda_podman_files.rpm";
     else if (pmda_perfevent[$NF]) f="pmda_perfevent_files.rpm";
 %if "@pmda_activemq@" == "true"
@@ -2759,6 +2715,7 @@ $1 == "d" {
 $1 == "f" && $6 ~ "etc/pcp.conf" { printf ("%%%%config ") >> f; }
 $1 == "f" && $6 ~ "etc/pcp.env"  { printf ("%%%%config ") >> f; }
 $1 == "f" && $6 ~ "etc/pcp.sh"   { printf ("%%%%config ") >> f; }
+$1 == "f" && $6 ~ "pmdapostgresql.conf"   { printf ("%%%%config(noreplace) ") >> f; }
 $1 == "f" {
 	    for (i=0; i < nconf; i++) {
 		if ($6 ~ conf[i]) {
@@ -2809,16 +2766,6 @@ PCP_CONFIG_DIR=@pcp_var_dir@/config
 PCP_SYSCONF_DIR=@pcp_sysconf_dir@
 PCP_LOG_DIR=@pcp_log_dir@
 PCP_ETC_DIR=@pcp_etc_dir@
-
-# transition pmdadmcache over to pmdadm (device mapper)
-PCP_PMCDCONF_PATH=@pcp_pmcdconf_path@
-PCP_PMDAS_DIR=@pcp_pmdas_dir@
-if grep -q ^dmcache "$PCP_PMCDCONF_PATH" 2>/dev/null
-then
-    mkdir -p -m 755 "$PCP_PMDAS_DIR/dm"
-    touch "$PCP_PMDAS_DIR/dm/.NeedInstall"
-    touch "$PCP_PMDAS_DIR/dmcache/.NeedRemove"
-fi
 
 # rename crontab files to align with current Fedora packaging guidelines
 for crontab in pmlogger pmie
@@ -2917,9 +2864,13 @@ chown -R pcp:pcp "$PCP_LOG_DIR/pmmgr" 2>/dev/null
 %post zeroconf
 PCP_PMDAS_DIR=@pcp_pmdas_dir@
 PCP_SYSCONFIG_DIR=@pcp_sysconfig_dir@
-# auto-install important PMDAs for RH Support
+PCP_PMCDCONF_PATH=@pcp_pmcdconf_path@
+# auto-install important PMDAs for RH Support (if not present already)
 for PMDA in dm nfsclient ; do
-    touch "$PCP_PMDAS_DIR/$PMDA/.NeedInstall"
+    if ! grep -q "$PMDA/pmda$PMDA" "$PCP_PMCDCONF_PATH"
+    then
+	touch "$PCP_PMDAS_DIR/$PMDA/.NeedInstall"
+    fi
 done
 # increase default pmlogger recording frequency
 sed -i 's/^\#\ PMLOGGER_INTERVAL.*/PMLOGGER_INTERVAL=10/g' "$PCP_SYSCONFIG_DIR/pmlogger"
@@ -2932,6 +2883,8 @@ pmieconf -c enable dmthin
     systemctl restart pmie >/dev/null 2>&1
     systemctl enable pmcd >/dev/null 2>&1
     systemctl enable pmlogger >/dev/null 2>&1
+    systemctl enable pmlogger_daily_report >/dev/null 2>&1
+    systemctl enable pmlogger_daily_report-poll >/dev/null 2>&1
     systemctl enable pmie >/dev/null 2>&1
 %else
     /sbin/chkconfig --add pmcd >/dev/null 2>&1
@@ -2957,11 +2910,6 @@ pmieconf -c enable dmthin
 %preun pmda-rpm
 %{pmda_remove "$1" "rpm"}
 %endif #preun pmda-rpm
-
-%if "@pmda_papi@" == "true"
-%preun pmda-papi
-%{pmda_remove "$1" "papi"}
-%endif #preun pmda-papi
 
 %if "@pmda_systemd@" == "true"
 %preun pmda-systemd
@@ -3189,6 +3137,17 @@ pmieconf -c enable dmthin
 %preun pmda-weblog
 %{pmda_remove "$1" "weblog"}
 
+%if "@enable_systemd@" == "true"
+%preun zeroconf
+if [ "$1" -eq 0 ]
+then
+    %systemd_preun pmlogger_daily_report.timer
+    %systemd_preun pmlogger_daily_report.service
+    %systemd_preun pmlogger_daily_report-poll.timer
+    %systemd_preun pmlogger_daily_report-poll.service
+fi
+%endif
+
 %preun
 if [ "$1" -eq 0 ]
 then
@@ -3273,16 +3232,6 @@ cd
 %{selinux_handle_policy "$1" "pcpupstream-container"}
 %endif
 
-%if "@pmda_bcc@" == "true"
-%post pmda-bcc
-%{pmda_notready "$1" "bcc"}
-%endif
-
-%if "@pmda_prometheus@" == "true"
-%post pmda-prometheus
-%{pmda_notready "$1" "prometheus"}
-%endif
-
 %files -f base_files.rpm
 
 %files conf -f cfg_files.rpm
@@ -3346,10 +3295,6 @@ cd
 
 %if "@pmda_infiniband@" == "true"
 %files pmda-infiniband -f pmda_infiniband_files.rpm
-%endif
-
-%if "@pmda_papi@" == "true"
-%files pmda-papi -f pmda_papi_files.rpm
 %endif
 
 %if "@pmda_podman@" == "true"

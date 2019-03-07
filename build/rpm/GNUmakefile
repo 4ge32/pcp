@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2012-2018 Red Hat.
+# Copyright (c) 2012-2019 Red Hat.
 # Copyright (c) 2000,2004 Silicon Graphics, Inc.  All Rights Reserved.
 # 
 # This program is free software; you can redistribute it and/or modify it
@@ -68,7 +68,6 @@ pcp.spec: pcp.spec.in
 	    -e's|@package_distribution@|$(PACKAGE_DISTRIBUTION)|g' \
 	    -e's|@pmda_bcc@|$(PMDA_BCC)|g' \
 	    -e's|@pmda_rpm@|$(PMDA_RPM)|g' \
-	    -e's|@pmda_papi@|$(PMDA_PAPI)|g' \
 	    -e's|@pmda_podman@|$(PMDA_PODMAN)|g' \
 	    -e's|@pmda_systemd@|$(PMDA_SYSTEMD)|g' \
 	    -e's|@pmda_infiniband@|$(PMDA_INFINIBAND)|g' \
@@ -108,6 +107,7 @@ pcp.spec: pcp.spec.in
 	    -e's|@have_python@|$(HAVE_PYTHON)|g' \
 	    -e's|@have_webapps@|$(HAVE_WEBAPPS)|g' \
 	    -e"s|@build_root@|$${DIST_ROOT}|g" \
+	    -e's|@pcp_pmcdconf_path@|$(PCP_PMCDCONF_PATH)|g' \
 	    -e's|@pcp_sysconfig_dir@|$(PCP_SYSCONFIG_DIR)|g' \
 	    -e's|@pcp_sysconf_dir@|$(PCP_SYSCONF_DIR)|g' \
 	    -e's|@pcp_share_dir@|$(PCP_SHARE_DIR)|g' \
@@ -120,6 +120,7 @@ pcp.spec: pcp.spec.in
 	    -e's|@rpm_version@|$(RPM_VERSION)|g' \
 	    -e's|@have_manpages@|$(HAVE_MANPAGES)|g' \
 	    -e's|@make@|$(PCP_MAKE_PROG)|g' <$? >$@
+	./do-maybe-requires
 
 include $(BUILDRULES)
 

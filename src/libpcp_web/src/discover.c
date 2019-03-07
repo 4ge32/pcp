@@ -18,8 +18,8 @@
 /* Decode various archive metafile records (desc, indom, labels, helptext) */
 static int pmDiscoverDecodeMetaDesc(uint32_t *, int, pmDesc *, int *, char ***);
 static int pmDiscoverDecodeMetaInDom(uint32_t *, int, pmTimespec *, pmInResult *);
-static int pmDiscoverDecodeMetaHelptext(uint32_t *, int, int *, int *, char **);
-static int pmDiscoverDecodeMetaLabelset(uint32_t *, int, pmTimespec *, int *, int *, int *, pmLabelSet **);
+static int pmDiscoverDecodeMetaHelpText(uint32_t *, int, int *, int *, char **);
+static int pmDiscoverDecodeMetaLabelSet(uint32_t *, int, pmTimespec *, int *, int *, int *, pmLabelSet **);
 
 /* array of registered callbacks, see pmDiscoverSetup() */
 static int discoverCallBackTableSize;
@@ -33,7 +33,7 @@ static pmDiscover *discover_hashtable[PM_DISCOVER_HASHTAB_SIZE];
 static unsigned int
 strhash(const char *s, unsigned int limit)
 {
-    unsigned int	h = 2166136261; /* FNV offset_basis */
+    unsigned int	h = 2166136261LL; /* FNV offset_basis */
     unsigned char	*us = (unsigned char *)s;
 
     for (; *us != '\0'; us++) {
@@ -61,6 +61,7 @@ pmDiscoverLookupAdd(const char *path, pmDiscoverModule *module, void *arg)
     if (h == NULL && module != NULL) {	/* hash table insert mode */
 	if ((h = (pmDiscover *)calloc(1, sizeof(pmDiscover))) == NULL)
 	    return NULL;
+	h->fd = -1; /* no meta descriptor initially */
 	h->ctx = -1; /* no PMAPI context initially */
 	h->flags = PM_DISCOVER_FLAGS_NEW;
 	h->context.type = PM_CONTEXT_ARCHIVE;
@@ -104,12 +105,10 @@ pmDiscoverDelete(sds path)
 	    else
 	    	p->next = h->next;
 
-	    if (h->ctx >= 0) {
-		if (h->flags & PM_DISCOVER_FLAGS_META)
-		    close(h->ctx);
-		else
-		    pmDestroyContext(h->ctx);
-	    }
+	    if (h->ctx >= 0)
+		pmDestroyContext(h->ctx);
+	    if (h->fd >= 0)
+		close(h->fd);
 
 	    sdsfree(h->context.name);
 	    sdsfree(h->context.source);
@@ -273,10 +272,12 @@ fs_change_callBack(uv_fs_event_t *handle, const char *filename, int events, int 
 static int
 pmDiscoverMonitor(sds path, void (*callback)(pmDiscover *))
 {
+    discoverModuleData	*data;
     pmDiscover		*p;
 
     if ((p = pmDiscoverLookup(path)) == NULL)
 	return -ESRCH;
+    data = getDiscoverModuleData(p->module);
 
     /* save the discovery callback to be invoked */
     p->changed = callback;
@@ -287,7 +288,7 @@ pmDiscoverMonitor(sds path, void (*callback)(pmDiscover *))
 	 * Start monitoring, using given uv loop. Up to the caller to create
 	 * a PCP PMAPI context and to fetch/logtail in the changed callback.
 	 */
-	uv_fs_event_init(p->module->events, p->event_handle);
+	uv_fs_event_init(data->events, p->event_handle);
 	uv_fs_event_start(p->event_handle, fs_change_callBack, p->context.name,
 			UV_FS_EVENT_WATCH_ENTRY);
     }
@@ -586,7 +587,6 @@ pmDiscoverNewSource(pmDiscover *p, int context)
     int			len, nsets;
 
     p->ctx = context;
-    /* TODO: use pmwebapi_source_meta */
     host = pmGetContextHostName_r(context, hostname, sizeof(hostname));
     if ((nsets = pmGetContextLabels(&labelset)) > 0) {
 	pmwebapi_source_hash(hash, labelset->json, labelset->jsonlen);
@@ -655,7 +655,6 @@ pmDiscoverInvokeCallBacks(pmDiscover *p)
 	    pmSetMode(PM_MODE_FORW, &tvp, 1);
 	}
 	else if (p->flags & PM_DISCOVER_FLAGS_META) {
-	    /* temporary context to get archive hostname and label details */
 	    if ((sts = pmNewContext(p->context.type, p->context.name)) < 0) {
 		infofmt(msg, "pmNewContext failed for %s: %s\n",
 				p->context.name, pmErrStr(sts));
@@ -663,10 +662,9 @@ pmDiscoverInvokeCallBacks(pmDiscover *p)
 		return;
 	    }
 	    pmDiscoverNewSource(p, sts);
-	    pmDestroyContext(sts);
 
-	    /* note: for archive meta files, p->ctx is a regular file descriptor */
-	    if ((p->ctx = open(p->context.name, O_RDONLY)) < 0) {
+	    /* for archive meta files, p->fd is the direct file descriptor */
+	    if ((p->fd = open(p->context.name, O_RDONLY)) < 0) {
 		infofmt(msg, "open failed for %s: %s\n", p->context.name,
 				osstrerror());
 		moduleinfo(p->module, PMLOG_ERROR, msg, p->data);
@@ -676,13 +674,12 @@ pmDiscoverInvokeCallBacks(pmDiscover *p)
 	    /*
 	     * Scan raw metadata file thru to current EOF, correctly handling
 	     * partial reads.
-	     * TODO: send initial metadata via callbacks under 'flags' control.
 	     */
-	    off = lseek(p->ctx, 0, SEEK_CUR);
+	    off = lseek(p->fd, 0, SEEK_CUR);
 	    for (nrec = 0; ; nrec++) {
-		if ((nb = read(p->ctx, &hdr, sizeof(hdr))) != sizeof(hdr)) {
+		if ((nb = read(p->fd, &hdr, sizeof(hdr))) != sizeof(hdr)) {
 		    /* EOF or partial read: rewind so we can wait for more data */
-		    lseek(p->ctx, off, SEEK_SET);
+		    lseek(p->fd, off, SEEK_SET);
 		    break;
 		}
 		hdr.len = ntohl(hdr.len);
@@ -700,9 +697,9 @@ pmDiscoverInvokeCallBacks(pmDiscover *p)
 		    }
 		}
 
-		if ((nb = read(p->ctx, buf, len)) != len) {
+		if ((nb = read(p->fd, buf, len)) != len) {
 		    /* EOF or partial read: rewind and wait for more data, as above */
-		    lseek(p->ctx, off, SEEK_SET);
+		    lseek(p->fd, off, SEEK_SET);
 		    break;
 		}
 	    }
@@ -734,7 +731,6 @@ pmDiscoverInvokeCallBacks(pmDiscover *p)
 	    pmDiscoverInvokeValuesCallBack(p, &ts, r);
 	    pmFreeResult(r);
 	}
-
     }
     else if (p->flags & PM_DISCOVER_FLAGS_META) {
     	/*
@@ -742,12 +738,12 @@ pmDiscoverInvokeCallBacks(pmDiscover *p)
 	 * and call all registered callbacks
 	 */
 	for (;;) {
-	    off = lseek(p->ctx, 0, SEEK_CUR);
-	    nb = read(p->ctx, &hdr, sizeof(__pmLogHdr));
+	    off = lseek(p->fd, 0, SEEK_CUR);
+	    nb = read(p->fd, &hdr, sizeof(__pmLogHdr));
 
 	    if (nb != sizeof(__pmLogHdr)) {
 		/* rewind so we can wait for more data on the next change CallBack */
-		lseek(p->ctx, off, SEEK_SET);
+		lseek(p->fd, off, SEEK_SET);
 		break;
 	    }
 
@@ -755,7 +751,7 @@ pmDiscoverInvokeCallBacks(pmDiscover *p)
 	    hdr.type = ntohl(hdr.type);
 	    if (hdr.len <= 0) {
 	    	/* rewind and wait for more data, as above */
-		lseek(p->ctx, off, SEEK_SET);
+		lseek(p->fd, off, SEEK_SET);
 		break;
 	    }
 
@@ -774,9 +770,9 @@ pmDiscoverInvokeCallBacks(pmDiscover *p)
 	    }
 
 	    /* read the body + trailer */
-	    if ((nb = read(p->ctx, buf, len)) != len) {
+	    if ((nb = read(p->fd, buf, len)) != len) {
 	    	/* rewind and wait for more data, as above */
-		lseek(p->ctx, off, SEEK_SET);
+		lseek(p->fd, off, SEEK_SET);
 		break;
 	    }
 
@@ -815,7 +811,7 @@ pmDiscoverInvokeCallBacks(pmDiscover *p)
 
 		case TYPE_LABEL:
 		    /* decode labelset from buffer */
-		    if (pmDiscoverDecodeMetaLabelset(buf, len, &ts, &id, &type, &nsets, &labelset) < 0)
+		    if (pmDiscoverDecodeMetaLabelSet(buf, len, &ts, &id, &type, &nsets, &labelset) < 0)
 			break;
 
 		    /*
@@ -845,7 +841,7 @@ pmDiscoverInvokeCallBacks(pmDiscover *p)
 			fprintf(stderr, "TEXT\n");
 		    /* decode help text from buffer */
 		    buffer = NULL;
-		    if ((sts = pmDiscoverDecodeMetaHelptext(buf, len, &type, &id, &buffer)) < 0)
+		    if ((sts = pmDiscoverDecodeMetaHelpText(buf, len, &type, &id, &buffer)) < 0)
 			break;
 		    /* use timestamp from last modification */
 		    ts.tv_sec = p->statbuf.st_mtim.tv_sec;
@@ -1086,7 +1082,7 @@ pmDiscoverDecodeMetaInDom(uint32_t *buf, int len, pmTimespec *ts, pmInResult *in
 }
 
 static int
-pmDiscoverDecodeMetaHelptext(uint32_t *buf, int len, int *type, int *id, char **buffer)
+pmDiscoverDecodeMetaHelpText(uint32_t *buf, int len, int *type, int *id, char **buffer)
 {
     char		*bp;
 
@@ -1103,7 +1099,7 @@ pmDiscoverDecodeMetaHelptext(uint32_t *buf, int len, int *type, int *id, char **
 }
 
 static int
-pmDiscoverDecodeMetaLabelset(uint32_t *buf, int buflen, pmTimespec *ts, int *identp, int *typep, int *nsetsp, pmLabelSet **setsp)
+pmDiscoverDecodeMetaLabelSet(uint32_t *buf, int buflen, pmTimespec *ts, int *identp, int *typep, int *nsetsp, pmLabelSet **setsp)
 {
     char		*json, *tbuf = (char *)buf;
     pmLabelSet		*labelsets = NULL;

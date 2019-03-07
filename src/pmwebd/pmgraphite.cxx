@@ -556,6 +556,8 @@ ac_refresh(struct MHD_Connection * connection, const string& filename)
     // already been stripped. However, in order to automatically handle compressed files,
     // we need to use the __pmFILE API.
 
+    int need_pmapi_archiveend = 0;
+ again:
     string archive_basename = e->filename.substr(0, e->filename.size() - 5);
     char lastvol_name[MAXPATHLEN];
     pmsprintf(lastvol_name, MAXPATHLEN, "%s.%d", archive_basename.c_str(), e->archive_lastvol_idx);
@@ -570,6 +572,34 @@ ac_refresh(struct MHD_Connection * connection, const string& filename)
 	       __pmAccess(nextvol_name, R_OK) != 0) { // no next volume
 	// nothing to do
     } else {
+        need_pmapi_archiveend = 1;
+
+	// see if we have flopped over to the next volume
+	if (__pmAccess (nextvol_name, R_OK) == 0) {
+	    // assume we only flopped over by one (otherwise this will
+	    // trigger again at next refresh)
+	    e->archive_lastvol_idx ++;
+	    rc = __pmStat (nextvol_name, &st);
+	    if (rc < 0) {
+		// whoops, we can access but not stat the new volume??
+		// XXX: we hope it is not corrupted, so that the later st.st_mtime reflects,
+		// at worst, the lastvol_name mtime.
+		connstamp (cerr, connection) << "cannot stat new volume " << nextvol_name << ": "
+					     << pmErrStr_r (rc, pmmsg, sizeof (pmmsg))
+					     << endl;
+	    }
+
+            // There may be some more volumes.  Repeat this search to find the last one.
+            // (Unfortunately, the PMAPI does not offer us this kind of information.)
+            goto again;
+	}
+
+	// update the cached mtim, whether it's the previous or next volume's stat
+	e->archive_lastvol_mtime = st.st_mtime;
+	e->last_refresh_time = now;
+    }
+
+    if (need_pmapi_archiveend)  {
 	// open a context if not already open from the new-archive or metrics case above
 	if (ctx < 0) {
 	    ctx = pmNewContext (PM_CONTEXT_ARCHIVE, filename.c_str ());
@@ -588,35 +618,16 @@ ac_refresh(struct MHD_Connection * connection, const string& filename)
 					 << pmErrStr_r (rc, pmmsg, sizeof (pmmsg))
 					 << endl;
 	}
-
-	// see if we have flopped over to the next volume
-	if (__pmAccess (nextvol_name, R_OK) == 0) {
-	    // assume we only flopped over by one (otherwise this will
-	    // trigger again at next refresh)
-	    e->archive_lastvol_idx ++;
-	    rc = __pmStat (nextvol_name, &st);
-	    if (rc < 0) {
-		// whoops, we can access but not stat the new volume??
-		// XXX: we hope it is not corrupted, so that the later st.st_mtime reflects,
-		// at worst, the lastvol_name mtime.
-		connstamp (cerr, connection) << "cannot stat new volume " << nextvol_name << ": "
-					     << pmErrStr_r (rc, pmmsg, sizeof (pmmsg))
-					     << endl;
-	    }
-	}
-
-	// update the cached mtim, whether it's the previous or next volume's stat
-	e->archive_lastvol_mtime = st.st_mtime;
-	e->last_refresh_time = now;
     }
-    
+
     if (ctx >= 0)
         pmDestroyContext (ctx);
 
     if (verbosity > 2)
         connstamp (clog, connection) << "searched " << e->filename
                                      << " (as " << e->archivepart << ")"
-                                     << " number of metrics: " << e->metrics.size()
+                                     << " metrics: " << e->metrics.size()
+                                     << " volumes: " << e->archive_lastvol_idx
                                      << endl;
 }
 
@@ -2220,12 +2231,18 @@ vector<float> round_linear (float& ymin, float& ymax, unsigned nticks)
 {
     vector<float> ticks;
 
-    // make some space between min & max
-    float epsilon = 0.5;
+    // make some space between min & max, even if both are initially
+    // close to each other or to zero; FLT_EPSILON would be less
+    // arbitrary, except y axis labeling is limited to precision(5),
+    // so use that.
+
+    // clog << "round min=" << ymin << " max=" << ymax << endl;
+    float epsilon = 0.0001 * (fabs(ymax) + 1.);
     if ((ymax - ymin) < epsilon) {
         ymin -= epsilon;
         ymax += epsilon;
     }
+    // clog << "round epsilon=" << epsilon << " newmin=" << ymin << " newmax=" << ymax << endl;
 
     if (nticks <= 1) {
         nticks = 3;
@@ -2727,7 +2744,9 @@ pmgraphite_respond_render_gfx (struct MHD_Connection *connection,
     if (params["graphOnly"] != "true") {
         // Shrink the graph to make room for axis labels; match apprx. layout to
         // grafana's javascript-side rendering engine
-        graphxlow = 5 * 8.0; // some digits of axis-label width
+        graphxlow = 8 * 8.0;
+        // some digits of axis-label width
+        // incl. scientific notation exponents; see also round_linear()
         graphxhigh = width * 0.96;
         graphyhigh -= 10.;
 
@@ -2761,6 +2780,7 @@ pmgraphite_respond_render_gfx (struct MHD_Connection *connection,
                 cairo_stroke (cr);
 
                 stringstream label;
+                // precision(5) => practical limit on round_linear epsilon
                 label << setprecision(5) << yticks[i];
                 string lstr = label.str ();
                 cairo_text_extents_t ext;

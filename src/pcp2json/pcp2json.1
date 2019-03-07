@@ -1,7 +1,7 @@
 '\"macro stdmacro
 .\"
-.\" Copyright (c) 2016-2018 Red Hat.
-.\" Copyright (C) 2015-2018 Marko Myllynen <myllynen@redhat.com>
+.\" Copyright (C) 2015-2019 Marko Myllynen <myllynen@redhat.com>
+.\" Copyright (C) 2016-2018 Red Hat.
 .\"
 .\" This program is free software; you can redistribute it and/or modify it
 .\" under the terms of the GNU General Public License as published by the
@@ -19,7 +19,8 @@
 \f3pcp2json\f1 \- pcp-to-json metrics exporter
 .SH SYNOPSIS
 \fBpcp2json\fP
-[\fB\-CEGHIjLnrRvVxXz?\fP]
+[\fB\-5CEGHIjLnrRvVxXz?\fP]
+[\fB\-4\fP \fIaction\fP]
 [\fB\-8\fP|\fB\-9\fP \fIlimit\fP]
 [\fB\-a\fP \fIarchive\fP]
 [\fB\-\-archive\-folio\fP \fIfolio\fP]
@@ -106,6 +107,7 @@ The following options are common with
 .BR type ,
 .BR type_prefer ,
 .BR ignore_incompat ,
+.BR names_change ,
 .BR instances ,
 .BR live_filter ,
 .BR rank ,
@@ -153,6 +155,28 @@ Default is \fBno\fP.
 .SH OPTIONS
 The available command line options are:
 .TP 5
+\fB\-0\fR \fIprecision\fR, \fB\-\-precision\-force\fR=\fIprecision\fR
+Like
+.B \-P
+but this option \fIwill\fP override per-metric specifications.
+.TP
+\fB\-4\fR \fIaction\fR, \fB\-\-names\-change\fR=\fIaction\fR
+Specify which
+.I action
+to take on receiving a metric names change event during sampling.
+These events occur when a PMDA discovers new metrics sometime
+after starting up, and informs running client tools like
+.BR pcp2json .
+Valid values for
+.I action
+are \fBupdate\fP (refresh metrics being sampled),
+\fBignore\fP (do nothing \- the default behaviour)
+and \fBabort\fP (exit the program if such an event happens).
+.TP
+\fB\-5\fR, \fB\-\-ignore\-unknown\fR
+Silently ignore any metric name that cannot be resolved.
+At least one metric must be found for the tool to start.
+.TP
 \fB\-8\fR \fIlimit\fR, \fB\-\-limit\-filter\fR=\fIlimit\fR
 Limit results to instances with values above/below
 .IR limit .
@@ -179,7 +203,7 @@ which is a comma-separated list of names, each
 of which may be the base name of an archive or the name of
 a directory containing one or more archives.
 .TP
-.B \-\-archive\-folio
+\fB\-\-archive\-folio\fR=\fIfolio\fR
 Read metric source archives from the PCP archive
 .I folio
 created by tools like
@@ -316,8 +340,10 @@ non-leaf nodes of the PMNS tree for reporting.
 Perform instance live filtering.
 This allows capturing all filtered instances even if processes
 are restarted at some point (unlike without live filtering).
-Doing live filtering over a huge amount of instances naturally
-comes with some overhead so a bit of user caution is advised.
+Performing live filtering over a huge amount of instances will add
+some internal overhead so a bit of user caution is advised.
+See also
+.BR \-n .
 .TP
 \fB\-J\fR \fIrank\fR, \fB\-\-rank\fR=\fIrank\fR
 Limit results to highest/lowest
@@ -351,7 +377,7 @@ See also
 .TP
 \fB\-n\fR, \fB\-\-invert\-filter\fR
 Perform ranking before live filtering.
-By default instance live filter filtering (when requested, see
+By default instance live filtering (when requested, see
 .BR \-j )
 happens before instance ranking (when requested, see
 .BR \-J ).
@@ -365,24 +391,24 @@ filter reference metrics.
 By default ranking (see
 .BR \-J )
 happens for each metric individually.
-With predicate filter reference metrics, ranking is done only for the
-specified metrics.
-When reporting, the rest of the metrics sharing the same
+With predicates, ranking is done only for the
+specified predicate metrics.
+When reporting, rest of the metrics sharing the same
 .I instance domain
 (see
 .BR PCPIntro (1))
-as the predicates will include only the highest/lowest ranking
-instances of the corresponding predicates.
+as the predicate will include only the highest/lowest ranking
+instances of the corresponding predicate.
 .RS
 .PP
-So for example, when the using \fBproc.memory.rss\fP
-(resident size of process)
+So for example, using \fBproc.memory.rss\fP
+(resident memory size of process)
 as the
 .I predicate
-and including \fBproc.io.total_bytes\fP and \fBmem.util.used\fP as metrics
-to be reported, only the processes using most/least memory (as per
+metric together with \fBproc.io.total_bytes\fP and \fBmem.util.used\fP as
+metrics to be reported, only the processes using most/least (as per
 .BR \-J )
-will be included when reporting total bytes written by processes.
+memory will be included when reporting total bytes written by processes.
 Since \fBmem.util.used\fP is a single-valued metric (thus not sharing the
 same instance domain as the process-related metrics),
 it will be reported as usual.
@@ -406,11 +432,6 @@ Use
 for numeric non-integer output values.
 The default is to use 3 decimal places (when applicable).
 This option will \fInot\fP override possible per-metric specifications.
-.TP
-\fB\-0\fR \fIprecision\fR, \fB\-\-precision\-force\fR=\fIprecision\fR
-Like
-.B \-P
-but this option \fIwill\fP override per-metric specifications.
 .TP
 \fB\-q\fR \fIscale\fR, \fB\-\-count\-scale\fR=\fIscale\fR
 .I Unit/scale
